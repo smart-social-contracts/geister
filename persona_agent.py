@@ -30,6 +30,7 @@ from typing import Optional
 
 from citizen_personas import get_persona, list_personas, CitizenPersona
 from realm_tools import REALM_TOOLS, execute_tool
+from agent_memory import AgentMemory
 
 
 # Default configuration
@@ -56,10 +57,13 @@ def call_ollama_with_tools(
     tools: list,
     network: str,
     realm_folder: str,
-    max_tool_rounds: int = 10
+    max_tool_rounds: int = 10,
+    tool_history: list = None
 ) -> str:
     """Call Ollama with tool support, handling tool calls iteratively."""
     current_messages = messages.copy()
+    if tool_history is None:
+        tool_history = []
     
     for round_num in range(max_tool_rounds):
         log(f"\n{'='*60}")
@@ -110,6 +114,13 @@ def call_ollama_with_tools(
             
             display_result = tool_result[:500] + "..." if len(tool_result) > 500 else tool_result
             log(f"  Result: {display_result}")
+            
+            # Track tool call for memory
+            tool_history.append({
+                "tool": tool_name,
+                "args": tool_args,
+                "result_preview": display_result[:200]
+            })
             
             current_messages.append({
                 "role": "tool",
@@ -177,10 +188,13 @@ def run_persona_agent(
     agent_name: str,
     network: str = DEFAULT_NETWORK,
     realm_folder: str = DEFAULT_REALM_FOLDER,
-    model: str = DEFAULT_MODEL
+    model: str = DEFAULT_MODEL,
+    agent_id: str = None,
+    principal: str = None,
+    realm_principal: str = None
 ) -> str:
     """
-    Run an agent with a specific persona.
+    Run an agent with a specific persona and persistent memory.
     
     Args:
         persona_name: Name of the persona (compliant, exploiter, watchful)
@@ -188,6 +202,9 @@ def run_persona_agent(
         network: Network to connect to
         realm_folder: Path to folder with dfx.json
         model: Ollama model to use
+        agent_id: Unique agent identifier for memory (dfx identity name)
+        principal: IC principal for this agent
+        realm_principal: Realm canister ID for memory scoping
     """
     ollama_url = get_ollama_url()
     
@@ -198,18 +215,31 @@ def run_persona_agent(
         log(f"Error: Unknown persona '{persona_name}'. Available: {available}")
         return ""
     
+    # Initialize memory system
+    memory = None
+    life_story = ""
+    if agent_id:
+        memory = AgentMemory(agent_id, principal=principal, persona=persona_name)
+        memory.ensure_profile(display_name=agent_name)
+        life_story = memory.get_life_story_prompt(realm_principal=realm_principal)
+        if memory.is_connected():
+            log(f"📚 Memory loaded for {agent_id}")
+    
     log("=" * 60)
     log(f"{persona.emoji} PERSONA AGENT: {persona.name.upper()}")
     log("=" * 60)
     log(f"Agent Name: {agent_name}")
+    log(f"Agent ID: {agent_id or 'none (no memory)'}")
     log(f"Persona: {persona.name} - {persona.description}")
     log(f"Motivation: {persona.motivation}")
     log(f"Network: {network}")
     log(f"Model: {model}")
     log("=" * 60)
     
-    # Build system prompt from persona
+    # Build system prompt from persona + life story
     system_prompt = persona.system_prompt
+    if life_story:
+        system_prompt = f"{system_prompt}\n\n{life_story}"
     
     # Build task prompt
     task_prompt = build_persona_task(persona, agent_name)
@@ -221,14 +251,35 @@ def run_persona_agent(
     
     log(f"\nStarting {persona.name} agent...")
     
+    # Track tool calls for memory
+    tool_history = []
+    
     final_response = call_ollama_with_tools(
         ollama_url=ollama_url,
         model=model,
         messages=messages,
         tools=REALM_TOOLS,
         network=network,
-        realm_folder=realm_folder
+        realm_folder=realm_folder,
+        tool_history=tool_history
     )
+    
+    # Save session to memory
+    if memory and agent_id:
+        # Summarize the session
+        action_types = list(set(t.get('tool') for t in tool_history if t.get('tool')))
+        action_summary = f"Session with {len(tool_history)} actions: {', '.join(action_types)}"
+        
+        memory.remember(
+            action_type="session",
+            action_summary=action_summary,
+            realm_principal=realm_principal,
+            action_details={"tools": tool_history, "response": final_response[:500]},
+            emotional_state=_infer_emotional_state(persona_name, final_response),
+            observations=_extract_observations(final_response)
+        )
+        memory.close()
+        log(f"📚 Session saved to memory")
     
     log("\n" + "=" * 60)
     log(f"{persona.emoji} AGENT COMPLETED: {persona.name.upper()}")
@@ -236,6 +287,44 @@ def run_persona_agent(
     log(f"\nSummary:\n{final_response}")
     
     return final_response
+
+
+def _infer_emotional_state(persona_name: str, response: str) -> str:
+    """Infer emotional state based on persona and response."""
+    response_lower = response.lower()
+    
+    if persona_name == "compliant":
+        if "success" in response_lower or "completed" in response_lower:
+            return "satisfied"
+        elif "error" in response_lower or "failed" in response_lower:
+            return "concerned"
+        return "content"
+    
+    elif persona_name == "exploiter":
+        if "opportunity" in response_lower or "found" in response_lower:
+            return "opportunistic"
+        elif "blocked" in response_lower or "restricted" in response_lower:
+            return "frustrated"
+        return "calculating"
+    
+    elif persona_name == "watchful":
+        if "suspicious" in response_lower or "concern" in response_lower:
+            return "vigilant"
+        elif "transparent" in response_lower or "fair" in response_lower:
+            return "cautiously optimistic"
+        return "analytical"
+    
+    return "neutral"
+
+
+def _extract_observations(response: str) -> str:
+    """Extract key observations from the response."""
+    # Simple extraction - take the last paragraph or sentence as observation
+    lines = response.strip().split('\n')
+    for line in reversed(lines):
+        if line.strip() and len(line.strip()) > 20:
+            return line.strip()[:200]
+    return ""
 
 
 def main():
@@ -273,6 +362,16 @@ def main():
         action="store_true",
         help="List available personas and exit"
     )
+    parser.add_argument(
+        "--agent-id",
+        default=None,
+        help="Agent ID for persistent memory (e.g., swarm_agent_001)"
+    )
+    parser.add_argument(
+        "--realm-principal",
+        default=None,
+        help="Realm canister ID for memory scoping"
+    )
     
     args = parser.parse_args()
     
@@ -308,7 +407,9 @@ def main():
             agent_name=agent_name,
             network=args.network,
             realm_folder=args.realm_folder,
-            model=args.model
+            model=args.model,
+            agent_id=args.agent_id,
+            realm_principal=args.realm_principal
         )
     except KeyboardInterrupt:
         log("\nAgent interrupted by user")

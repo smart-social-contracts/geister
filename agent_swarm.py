@@ -311,6 +311,9 @@ def cmd_run(
                 if agent_persona:
                     log(f"   Persona: {agent_persona}")
                 
+                # Get principal for this identity (for memory)
+                principal = get_principal_for_identity(identity_name)
+                
                 # Run appropriate agent type
                 if agent_persona:
                     result = run_persona_agent(
@@ -318,7 +321,9 @@ def cmd_run(
                         agent_name=agent_name,
                         network=network,
                         model=model,
-                        realm_folder="."
+                        realm_folder=".",
+                        agent_id=identity_name,
+                        principal=principal
                     )
                 else:
                     result = run_citizen_agent(
