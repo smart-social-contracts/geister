@@ -33,6 +33,8 @@ import time
 from typing import List, Optional
 
 from citizen_agent import run_citizen_agent
+from persona_agent import run_persona_agent
+from citizen_personas import list_personas, get_persona
 
 
 # =============================================================================
@@ -206,9 +208,21 @@ def cmd_run(
     end: Optional[int] = None,
     network: str = DEFAULT_NETWORK,
     model: str = DEFAULT_MODEL,
-    delay: float = 1.0
+    delay: float = 1.0,
+    persona: Optional[str] = None,
+    persona_distribution: bool = False
 ):
-    """Run citizen agents for the specified identity range."""
+    """Run citizen agents for the specified identity range.
+    
+    Args:
+        start: Starting agent index
+        end: Ending agent index (inclusive)
+        network: Network to use
+        model: Ollama model
+        delay: Delay between agents in seconds
+        persona: Single persona for all agents (compliant, exploiter, watchful)
+        persona_distribution: Use realistic distribution of personas
+    """
     identities = list_agent_identities()
     
     if not identities:
@@ -217,7 +231,6 @@ def cmd_run(
     
     # Determine end index
     if end is None:
-        # Find max index from existing identities
         max_idx = 0
         for name in identities:
             try:
@@ -238,7 +251,32 @@ def cmd_run(
         log(f"No identities found in range {start}-{end}")
         return
     
-    log(f"Running {len(target_identities)} agents (indices {start}-{end})")
+    # Build persona assignments
+    persona_assignments = {}
+    available_personas = list_personas()
+    
+    if persona_distribution:
+        # Realistic distribution: 50% compliant, 25% watchful, 25% exploiter
+        import random
+        distribution = (
+            ["compliant"] * 50 +
+            ["watchful"] * 25 +
+            ["exploiter"] * 25
+        )
+        random.shuffle(distribution)
+        for idx, (i, _) in enumerate(target_identities):
+            persona_assignments[i] = distribution[idx % len(distribution)]
+        log("Using persona distribution: 50% compliant, 25% watchful, 25% exploiter")
+    elif persona:
+        if persona.lower() not in available_personas:
+            log(f"Unknown persona '{persona}'. Available: {', '.join(available_personas)}")
+            return
+        for i, _ in target_identities:
+            persona_assignments[i] = persona.lower()
+        log(f"All agents using persona: {persona}")
+    
+    agent_type = "persona" if persona_assignments else "citizen"
+    log(f"Running {len(target_identities)} {agent_type} agents (indices {start}-{end})")
     log(f"Network: {network}, Model: {model}")
     log("=" * 60)
     
@@ -249,34 +287,53 @@ def cmd_run(
     
     try:
         for index, identity_name in target_identities:
-            agent_name = f"Agent{index:03d}"
+            agent_persona = persona_assignments.get(index)
+            
+            if agent_persona:
+                p = get_persona(agent_persona)
+                agent_name = f"{p.name}{index:03d}" if p else f"Agent{index:03d}"
+                emoji = p.emoji if p else "🤖"
+            else:
+                agent_name = f"Agent{index:03d}"
+                emoji = "🤖"
             
             try:
                 # Switch to this identity
                 if not use_identity(identity_name):
-                    results.append({"index": index, "success": False, "error": "Failed to switch identity"})
+                    results.append({"index": index, "success": False, "error": "Failed to switch identity", "persona": agent_persona})
                     continue
                 
                 # Small delay to avoid rate limiting
                 if delay > 0:
                     time.sleep(delay)
                 
-                # Run the citizen agent
-                log(f"\n[Agent {index:03d}] Starting as {identity_name}...")
+                log(f"\n{emoji} [Agent {index:03d}] Starting as {identity_name}...")
+                if agent_persona:
+                    log(f"   Persona: {agent_persona}")
                 
-                result = run_citizen_agent(
-                    name=agent_name,
-                    network=network,
-                    model=model,
-                    realm_folder="."
-                )
+                # Run appropriate agent type
+                if agent_persona:
+                    result = run_persona_agent(
+                        persona_name=agent_persona,
+                        agent_name=agent_name,
+                        network=network,
+                        model=model,
+                        realm_folder="."
+                    )
+                else:
+                    result = run_citizen_agent(
+                        name=agent_name,
+                        network=network,
+                        model=model,
+                        realm_folder="."
+                    )
                 
-                results.append({"index": index, "success": True})
-                log(f"[Agent {index:03d}] ✓ Completed")
+                results.append({"index": index, "success": True, "persona": agent_persona})
+                log(f"{emoji} [Agent {index:03d}] ✓ Completed")
                 
             except Exception as e:
-                results.append({"index": index, "success": False, "error": str(e)})
-                log(f"[Agent {index:03d}] ✗ Failed: {e}")
+                results.append({"index": index, "success": False, "error": str(e), "persona": agent_persona})
+                log(f"{emoji} [Agent {index:03d}] ✗ Failed: {e}")
     
     finally:
         # Restore original identity
@@ -293,6 +350,16 @@ def cmd_run(
     log(f"Total agents: {len(results)}")
     log(f"Successful: {successful}")
     log(f"Failed: {failed}")
+    
+    # Persona breakdown
+    if persona_assignments:
+        from collections import Counter
+        persona_counts = Counter(r.get("persona") for r in results if r.get("persona"))
+        log("\nPersona breakdown:")
+        for p_name, count in sorted(persona_counts.items()):
+            p = get_persona(p_name)
+            emoji = p.emoji if p else "?"
+            log(f"  {emoji} {p_name}: {count}")
 
 
 def cmd_cleanup(confirm: bool = False):
@@ -348,6 +415,8 @@ def main():
     run_parser.add_argument("--network", "-n", default=DEFAULT_NETWORK, help="Network to use")
     run_parser.add_argument("--model", "-m", default=DEFAULT_MODEL, help="Ollama model to use")
     run_parser.add_argument("--delay", "-d", type=float, default=1.0, help="Delay between agents (seconds)")
+    run_parser.add_argument("--persona", "-p", default=None, help="Persona for all agents (compliant, exploiter, watchful)")
+    run_parser.add_argument("--distribution", action="store_true", help="Use realistic persona distribution (50%% compliant, 25%% watchful, 25%% exploiter)")
     
     # cleanup command
     cleanup_parser = subparsers.add_parser("cleanup", help="Delete all agent identities")
@@ -360,7 +429,7 @@ def main():
     elif args.command == "list":
         cmd_list()
     elif args.command == "run":
-        cmd_run(args.start, args.end, args.network, args.model, args.delay)
+        cmd_run(args.start, args.end, args.network, args.model, args.delay, args.persona, args.distribution)
     elif args.command == "cleanup":
         cmd_cleanup(args.confirm)
     else:
