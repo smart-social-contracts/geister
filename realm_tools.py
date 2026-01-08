@@ -1,216 +1,352 @@
 #!/usr/bin/env python3
 """
-Realm Tools - Functions that Ashoka LLM can call to explore realm data
+Realm Tools - Functions that Ashoka LLM can call to interact with realm data
+
+Provides tools for:
+- Citizen actions (join, profile, status)
+- Governance (proposals, voting)
+- Economic (balance, transactions)
 """
 import subprocess
 import json
+import os
 import traceback
-from typing import Optional
+from typing import Optional, Dict, Any
 
 
-def db_get(entity_type: str, network: str = "staging", realm_folder: str = "../realms/examples/demo/realm1") -> str:
-    """
-    Get entities from the realm database.
-    
-    Args:
-        entity_type: Type of entity to query (User, Proposal, Vote, Transfer, Mandate, Task, Organization)
-        network: Network to query (local, staging, ic)
-        realm_folder: Path to realm folder containing dfx.json
-    
-    Returns:
-        JSON string of entities found
-    """
-    import os
-    cmd = ["realms", "db", "-f", realm_folder, "-n", network, "get", entity_type]
-    
-    # Set environment to suppress DFX security warnings for read-only operations
+# =============================================================================
+# Common Helper Functions
+# =============================================================================
+
+def _get_env() -> dict:
+    """Get environment with DFX warnings suppressed."""
     env = os.environ.copy()
     env['DFX_WARNING'] = '-mainnet_plaintext_identity'
-    
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
-        if result.returncode == 0:
-            return result.stdout.strip() or "No entities found"
-        else:
-            return f"Error: {result.stderr.strip()}"
-    except subprocess.TimeoutExpired:
-        return "Error: Command timed out"
-    except Exception as e:
-        traceback.print_exc()
-        return f"Error: {str(e)}"
+    return env
 
 
-def join_realm(profile: str = "member", network: str = "staging", realm_folder: str = ".") -> str:
+def _run_dfx_call(
+    canister: str,
+    method: str,
+    args: str = "()",
+    network: str = "staging",
+    realm_folder: str = ".",
+    timeout: int = 60
+) -> str:
     """
-    Join a realm as a citizen with a specific profile.
+    Run a dfx canister call with JSON output.
     
     Args:
-        profile: Profile type to join with (member, admin)
-        network: Network to use (local, staging, ic)
-        realm_folder: Path to realm folder containing dfx.json
+        canister: Canister name (e.g., "realm_backend")
+        method: Method to call
+        args: Candid arguments string
+        network: Network to use
+        realm_folder: Working directory with dfx.json
+        timeout: Command timeout in seconds
     
     Returns:
-        JSON string with result of joining the realm
+        JSON string result or error message
     """
-    import os
     cmd = [
-        "dfx", "canister", "call", "realm_backend", "join_realm",
-        f'("{profile}")',
-        "--network", network
+        "dfx", "canister", "call", canister, method, args,
+        "--network", network,
+        "--output", "json"
     ]
     
-    env = os.environ.copy()
-    env['DFX_WARNING'] = '-mainnet_plaintext_identity'
-    
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, cwd=realm_folder, env=env)
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=realm_folder,
+            env=_get_env()
+        )
         if result.returncode == 0:
-            return result.stdout.strip() or "Successfully joined realm"
+            return result.stdout.strip() or "{}"
         else:
-            return f"Error: {result.stderr.strip()}"
+            return json.dumps({"error": result.stderr.strip()})
     except subprocess.TimeoutExpired:
-        return "Error: Command timed out"
+        return json.dumps({"error": "Command timed out"})
     except Exception as e:
         traceback.print_exc()
-        return f"Error: {str(e)}"
+        return json.dumps({"error": str(e)})
+
+
+def _run_extension_call(
+    extension: str,
+    function: str,
+    args: Dict[str, Any] = None,
+    network: str = "staging",
+    realm_folder: str = ".",
+    timeout: int = 60
+) -> str:
+    """
+    Run an extension sync call with JSON output.
+    
+    Args:
+        extension: Extension name (e.g., "voting", "vault")
+        function: Function to call
+        args: Dictionary of arguments (will be JSON encoded)
+        network: Network to use
+        realm_folder: Working directory with dfx.json
+        timeout: Command timeout in seconds
+    
+    Returns:
+        JSON string result or error message
+    """
+    args_dict = args or {}
+    args_json = json.dumps(args_dict).replace('"', '\\"')
+    
+    candid_args = f'(record {{ extension_name = "{extension}"; function_name = "{function}"; args = "{args_json}"; }})'
+    
+    return _run_dfx_call(
+        canister="realm_backend",
+        method="extension_sync_call",
+        args=candid_args,
+        network=network,
+        realm_folder=realm_folder,
+        timeout=timeout
+    )
+
+
+def _run_realms_cli(
+    subcommand: list,
+    network: str = "staging",
+    realm_folder: str = ".",
+    timeout: int = 30
+) -> str:
+    """
+    Run a realms CLI command.
+    
+    Args:
+        subcommand: List of subcommand parts (e.g., ["realm", "call", "status"])
+        network: Network to use
+        realm_folder: Working directory
+        timeout: Command timeout in seconds
+    
+    Returns:
+        Command output or error message
+    """
+    cmd = ["realms"] + subcommand + ["-n", network]
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=realm_folder,
+            env=_get_env()
+        )
+        if result.returncode == 0:
+            return result.stdout.strip() or "{}"
+        else:
+            return json.dumps({"error": result.stderr.strip()})
+    except subprocess.TimeoutExpired:
+        return json.dumps({"error": "Command timed out"})
+    except Exception as e:
+        traceback.print_exc()
+        return json.dumps({"error": str(e)})
+
+
+# =============================================================================
+# Citizen Tools
+# =============================================================================
+
+def join_realm(profile: str = "member", network: str = "staging", realm_folder: str = ".") -> str:
+    """Join a realm as a citizen with a specific profile."""
+    return _run_dfx_call(
+        canister="realm_backend",
+        method="join_realm",
+        args=f'("{profile}")',
+        network=network,
+        realm_folder=realm_folder
+    )
 
 
 def set_profile_picture(profile_picture_url: str, network: str = "staging", realm_folder: str = ".") -> str:
-    """
-    Set your profile picture in the realm.
-    
-    Args:
-        profile_picture_url: URL to the profile picture image
-        network: Network to use (local, staging, ic)
-        realm_folder: Path to realm folder containing dfx.json
-    
-    Returns:
-        JSON string with result of updating profile picture
-    """
-    import os
-    cmd = [
-        "dfx", "canister", "call", "realm_backend", "update_my_profile_picture",
-        f'("{profile_picture_url}")',
-        "--network", network
-    ]
-    
-    env = os.environ.copy()
-    env['DFX_WARNING'] = '-mainnet_plaintext_identity'
-    
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, cwd=realm_folder, env=env)
-        if result.returncode == 0:
-            return result.stdout.strip() or "Successfully updated profile picture"
-        else:
-            return f"Error: {result.stderr.strip()}"
-    except subprocess.TimeoutExpired:
-        return "Error: Command timed out"
-    except Exception as e:
-        traceback.print_exc()
-        return f"Error: {str(e)}"
+    """Set your profile picture in the realm."""
+    return _run_dfx_call(
+        canister="realm_backend",
+        method="update_my_profile_picture",
+        args=f'("{profile_picture_url}")',
+        network=network,
+        realm_folder=realm_folder
+    )
 
 
 def get_my_status(network: str = "staging", realm_folder: str = ".") -> str:
-    """
-    Get your current user status in the realm.
-    
-    Args:
-        network: Network to use (local, staging, ic)
-        realm_folder: Path to realm folder containing dfx.json
-    
-    Returns:
-        JSON string with your user status (principal, profiles, profile picture)
-    """
-    import os
-    cmd = [
-        "dfx", "canister", "call", "realm_backend", "get_my_user_status",
-        "--network", network
-    ]
-    
-    env = os.environ.copy()
-    env['DFX_WARNING'] = '-mainnet_plaintext_identity'
-    
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=realm_folder, env=env)
-        if result.returncode == 0:
-            return result.stdout.strip() or "No status available"
-        else:
-            return f"Error: {result.stderr.strip()}"
-    except subprocess.TimeoutExpired:
-        return "Error: Command timed out"
-    except Exception as e:
-        traceback.print_exc()
-        return f"Error: {str(e)}"
+    """Get your current user status in the realm."""
+    return _run_dfx_call(
+        canister="realm_backend",
+        method="get_my_user_status",
+        args="()",
+        network=network,
+        realm_folder=realm_folder
+    )
 
 
-def realm_status(network: str = "local", realm_folder: str = ".") -> str:
-    """
-    Get the current status of a realm (users count, proposals, votes, etc.).
-    
-    Args:
-        network: Network to query (local, staging, ic)
-        realm_folder: Path to realm folder containing dfx.json
-    
-    Returns:
-        JSON string with realm status including counts for users, proposals, votes, etc.
-    """
-    import os
-    cmd = ["realms", "realm", "call", "status", "-n", network]
-    
-    # Set environment to suppress DFX security warnings for read-only operations
-    env = os.environ.copy()
-    env['DFX_WARNING'] = '-mainnet_plaintext_identity'
-    
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=realm_folder, env=env)
-        if result.returncode == 0:
-            return result.stdout.strip() or "No status available"
-        else:
-            return f"Error: {result.stderr.strip()}"
-    except subprocess.TimeoutExpired:
-        return "Error: Command timed out"
-    except Exception as e:
-        traceback.print_exc()
-        return f"Error: {str(e)}"
+def get_my_principal(network: str = "staging", realm_folder: str = ".") -> str:
+    """Get your principal ID."""
+    return _run_dfx_call(
+        canister="realm_backend",
+        method="get_my_principal",
+        args="()",
+        network=network,
+        realm_folder=realm_folder
+    )
 
 
-# Tool definitions for Ollama (OpenAI-compatible format)
+# =============================================================================
+# Realm Status Tools
+# =============================================================================
+
+def realm_status(network: str = "staging", realm_folder: str = ".") -> str:
+    """Get the current status of the realm (users, proposals, votes, extensions)."""
+    return _run_dfx_call(
+        canister="realm_backend",
+        method="status",
+        args="()",
+        network=network,
+        realm_folder=realm_folder
+    )
+
+
+def db_get(entity_type: str, network: str = "staging", realm_folder: str = ".") -> str:
+    """Get entities from the realm database."""
+    return _run_realms_cli(
+        subcommand=["db", "-f", realm_folder, "get", entity_type],
+        network=network,
+        realm_folder=realm_folder
+    )
+
+
+# =============================================================================
+# Governance / Voting Tools
+# =============================================================================
+
+def get_proposals(status: Optional[str] = None, network: str = "staging", realm_folder: str = ".") -> str:
+    """Get governance proposals from the realm."""
+    args = {"status": status} if status else {}
+    return _run_extension_call(
+        extension="voting",
+        function="get_proposals",
+        args=args,
+        network=network,
+        realm_folder=realm_folder
+    )
+
+
+def get_proposal(proposal_id: str, network: str = "staging", realm_folder: str = ".") -> str:
+    """Get details of a specific proposal."""
+    return _run_extension_call(
+        extension="voting",
+        function="get_proposal",
+        args={"proposal_id": proposal_id},
+        network=network,
+        realm_folder=realm_folder
+    )
+
+
+def cast_vote(proposal_id: str, vote: str, voter_id: str, network: str = "staging", realm_folder: str = ".") -> str:
+    """Cast a vote on a proposal (yes/no/abstain)."""
+    if vote not in ["yes", "no", "abstain"]:
+        return json.dumps({"error": f"vote must be 'yes', 'no', or 'abstain', got '{vote}'"})
+    
+    return _run_extension_call(
+        extension="voting",
+        function="cast_vote",
+        args={"proposal_id": proposal_id, "vote": vote, "voter": voter_id},
+        network=network,
+        realm_folder=realm_folder
+    )
+
+
+def get_my_vote(proposal_id: str, voter_id: str, network: str = "staging", realm_folder: str = ".") -> str:
+    """Check if you have already voted on a proposal."""
+    return _run_extension_call(
+        extension="voting",
+        function="get_user_vote",
+        args={"proposal_id": proposal_id, "voter": voter_id},
+        network=network,
+        realm_folder=realm_folder
+    )
+
+
+# =============================================================================
+# Economic / Vault Tools
+# =============================================================================
+
+def get_balance(principal_id: Optional[str] = None, network: str = "staging", realm_folder: str = ".") -> str:
+    """Get token balance for a principal in the vault."""
+    # If no principal provided, get our own first
+    if not principal_id:
+        principal_result = get_my_principal(network=network, realm_folder=realm_folder)
+        try:
+            # Parse the JSON result to extract principal
+            data = json.loads(principal_result)
+            if isinstance(data, str):
+                principal_id = data
+            elif isinstance(data, dict) and "error" in data:
+                return principal_result
+        except json.JSONDecodeError:
+            # Handle raw string output
+            principal_id = principal_result.strip().strip('"')
+    
+    return _run_extension_call(
+        extension="vault",
+        function="get_balance",
+        args={"principal_id": principal_id},
+        network=network,
+        realm_folder=realm_folder
+    )
+
+
+def get_transactions(principal_id: Optional[str] = None, network: str = "staging", realm_folder: str = ".") -> str:
+    """Get transaction history for a principal."""
+    if not principal_id:
+        principal_result = get_my_principal(network=network, realm_folder=realm_folder)
+        try:
+            data = json.loads(principal_result)
+            if isinstance(data, str):
+                principal_id = data
+            elif isinstance(data, dict) and "error" in data:
+                return principal_result
+        except json.JSONDecodeError:
+            principal_id = principal_result.strip().strip('"')
+    
+    return _run_extension_call(
+        extension="vault",
+        function="get_transactions",
+        args={"principal_id": principal_id},
+        network=network,
+        realm_folder=realm_folder
+    )
+
+
+def get_vault_status(network: str = "staging", realm_folder: str = ".") -> str:
+    """Get vault status and statistics."""
+    return _run_extension_call(
+        extension="vault",
+        function="get_status",
+        args={},
+        network=network,
+        realm_folder=realm_folder
+    )
+
+
+# =============================================================================
+# Tool Definitions for Ollama (OpenAI-compatible format)
+# =============================================================================
+
 REALM_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "db_get",
-            "description": "Get entities from the realm database. Use this to query any entity type including: User, Proposal, Vote, Transfer, Mandate, Task, Organization, Codex, Dispute, Instrument, License, Trade, Contract, Invoice, Balance, Treasury, and more.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "entity_type": {
-                        "type": "string",
-                        "description": "Type of entity to query from the realm database",
-                        "enum": ["Balance", "Call", "Codex", "Contract", "Dispute", "Human", "Identity", "Instrument", "Invoice", "Land", "License", "Mandate", "Member", "Notification", "Organization", "PaymentAccount", "Permission", "Proposal", "Realm", "Registry", "Service", "Status", "Task", "TaskExecution", "TaskSchedule", "TaskStep", "Trade", "Transfer", "Treasury", "User", "UserProfile", "Vote"]
-                    }
-                },
-                "required": ["entity_type"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "realm_status",
-            "description": "Get the current status of the realm including counts for all entity types (users, proposals, votes, codexes, disputes, instruments, licenses, trades, etc.) and installed extensions.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        }
-    },
+    # Citizen Tools
     {
         "type": "function",
         "function": {
             "name": "join_realm",
-            "description": "Join the realm as a citizen. This registers you as a user in the realm with the specified profile (member or admin).",
+            "description": "Join the realm as a citizen. This registers you as a user with the specified profile (member or admin).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -247,29 +383,198 @@ REALM_TOOLS = [
         "function": {
             "name": "get_my_status",
             "description": "Get your current user status in the realm, including your principal ID, profiles, and profile picture URL.",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_my_principal",
+            "description": "Get your principal ID (your unique identifier on the Internet Computer).",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    # Realm Status Tools
+    {
+        "type": "function",
+        "function": {
+            "name": "realm_status",
+            "description": "Get the current status of the realm including counts for all entity types (users, proposals, votes, codexes, disputes, etc.) and installed extensions.",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "db_get",
+            "description": "Get entities from the realm database. Query any entity type including: User, Proposal, Vote, Transfer, Mandate, Task, Organization, Codex, Dispute, etc.",
             "parameters": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "entity_type": {
+                        "type": "string",
+                        "description": "Type of entity to query from the realm database",
+                        "enum": ["Balance", "Codex", "Dispute", "Identity", "Invoice", "Land", "License", "Mandate", "Organization", "Proposal", "Realm", "Task", "Transfer", "Treasury", "User", "UserProfile", "Vote"]
+                    }
+                },
+                "required": ["entity_type"]
+            }
+        }
+    },
+    # Governance / Voting Tools
+    {
+        "type": "function",
+        "function": {
+            "name": "get_proposals",
+            "description": "Get governance proposals from the realm. Optionally filter by status.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "Filter proposals by status",
+                        "enum": ["pending_review", "accepted", "rejected", "executed"]
+                    }
+                },
                 "required": []
             }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_proposal",
+            "description": "Get details of a specific proposal by ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proposal_id": {
+                        "type": "string",
+                        "description": "The proposal ID (e.g., 'prop_001')"
+                    }
+                },
+                "required": ["proposal_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cast_vote",
+            "description": "Cast a vote on a proposal. You must provide your voter_id (your user ID in the realm).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proposal_id": {
+                        "type": "string",
+                        "description": "The proposal ID to vote on"
+                    },
+                    "vote": {
+                        "type": "string",
+                        "description": "Your vote",
+                        "enum": ["yes", "no", "abstain"]
+                    },
+                    "voter_id": {
+                        "type": "string",
+                        "description": "Your user ID in the realm"
+                    }
+                },
+                "required": ["proposal_id", "vote", "voter_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_my_vote",
+            "description": "Check if you have already voted on a proposal.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proposal_id": {
+                        "type": "string",
+                        "description": "The proposal ID to check"
+                    },
+                    "voter_id": {
+                        "type": "string",
+                        "description": "Your user ID in the realm"
+                    }
+                },
+                "required": ["proposal_id", "voter_id"]
+            }
+        }
+    },
+    # Economic / Vault Tools
+    {
+        "type": "function",
+        "function": {
+            "name": "get_balance",
+            "description": "Get token balance for a principal in the vault. Defaults to your own balance if no principal specified.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "principal_id": {
+                        "type": "string",
+                        "description": "Principal ID to check (optional, defaults to your own)"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_transactions",
+            "description": "Get transaction history for a principal. Defaults to your own if no principal specified.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "principal_id": {
+                        "type": "string",
+                        "description": "Principal ID to check (optional, defaults to your own)"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_vault_status",
+            "description": "Get vault status and statistics including balances and canister configuration.",
+            "parameters": {"type": "object", "properties": {}, "required": []}
         }
     }
 ]
 
 # Map function names to actual functions
 TOOL_FUNCTIONS = {
-    "db_get": db_get,
-    "realm_status": realm_status,
+    # Citizen
     "join_realm": join_realm,
     "set_profile_picture": set_profile_picture,
-    "get_my_status": get_my_status
+    "get_my_status": get_my_status,
+    "get_my_principal": get_my_principal,
+    # Realm status
+    "realm_status": realm_status,
+    "db_get": db_get,
+    # Governance
+    "get_proposals": get_proposals,
+    "get_proposal": get_proposal,
+    "cast_vote": cast_vote,
+    "get_my_vote": get_my_vote,
+    # Economic
+    "get_balance": get_balance,
+    "get_transactions": get_transactions,
+    "get_vault_status": get_vault_status,
 }
 
 
-def execute_tool(tool_name: str, arguments: dict, network: str = "staging", realm_folder: str = "../realms/examples/demo/realm1") -> str:
+def execute_tool(tool_name: str, arguments: dict, network: str = "staging", realm_folder: str = ".") -> str:
     """Execute a tool by name with given arguments."""
     if tool_name not in TOOL_FUNCTIONS:
-        return f"Error: Unknown tool '{tool_name}'"
+        return json.dumps({"error": f"Unknown tool '{tool_name}'"})
     
     # Filter to only valid arguments for the function
     func = TOOL_FUNCTIONS[tool_name]
