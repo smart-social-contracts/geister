@@ -30,7 +30,7 @@ from typing import Optional
 
 from citizen_personas import get_persona, list_personas, CitizenPersona
 from realm_tools import REALM_TOOLS, execute_tool
-from agent_memory import AgentMemory
+from agent_memory import AgentMemory, DatabaseConnectionError
 
 
 # Default configuration
@@ -215,21 +215,20 @@ def run_persona_agent(
         log(f"Error: Unknown persona '{persona_name}'. Available: {available}")
         return ""
     
-    # Initialize memory system
-    memory = None
-    life_story = ""
-    if agent_id:
-        memory = AgentMemory(agent_id, principal=principal, persona=persona_name)
-        memory.ensure_profile(display_name=agent_name)
-        life_story = memory.get_life_story_prompt(realm_principal=realm_principal)
-        if memory.is_connected():
-            log(f"📚 Memory loaded for {agent_id}")
+    # Initialize memory system (required)
+    if not agent_id:
+        raise ValueError("agent_id is required for memory persistence")
+    
+    memory = AgentMemory(agent_id, principal=principal, persona=persona_name)
+    memory.ensure_profile(display_name=agent_name)
+    life_story = memory.get_life_story_prompt(realm_principal=realm_principal)
+    log(f"📚 Memory loaded for {agent_id}")
     
     log("=" * 60)
     log(f"{persona.emoji} PERSONA AGENT: {persona.name.upper()}")
     log("=" * 60)
     log(f"Agent Name: {agent_name}")
-    log(f"Agent ID: {agent_id or 'none (no memory)'}")
+    log(f"Agent ID: {agent_id}")
     log(f"Persona: {persona.name} - {persona.description}")
     log(f"Motivation: {persona.motivation}")
     log(f"Network: {network}")
@@ -265,21 +264,19 @@ def run_persona_agent(
     )
     
     # Save session to memory
-    if memory and agent_id:
-        # Summarize the session
-        action_types = list(set(t.get('tool') for t in tool_history if t.get('tool')))
-        action_summary = f"Session with {len(tool_history)} actions: {', '.join(action_types)}"
-        
-        memory.remember(
-            action_type="session",
-            action_summary=action_summary,
-            realm_principal=realm_principal,
-            action_details={"tools": tool_history, "response": final_response[:500]},
-            emotional_state=_infer_emotional_state(persona_name, final_response),
-            observations=_extract_observations(final_response)
-        )
-        memory.close()
-        log(f"📚 Session saved to memory")
+    action_types = list(set(t.get('tool') for t in tool_history if t.get('tool')))
+    action_summary = f"Session with {len(tool_history)} actions: {', '.join(action_types)}"
+    
+    memory.remember(
+        action_type="session",
+        action_summary=action_summary,
+        realm_principal=realm_principal,
+        action_details={"tools": tool_history, "response": final_response[:500]},
+        emotional_state=_infer_emotional_state(persona_name, final_response),
+        observations=_extract_observations(final_response)
+    )
+    memory.close()
+    log(f"📚 Session saved to memory")
     
     log("\n" + "=" * 60)
     log(f"{persona.emoji} AGENT COMPLETED: {persona.name.upper()}")
@@ -364,8 +361,8 @@ def main():
     )
     parser.add_argument(
         "--agent-id",
-        default=None,
-        help="Agent ID for persistent memory (e.g., swarm_agent_001)"
+        required=True,
+        help="Agent ID for persistent memory (REQUIRED, e.g., swarm_agent_001)"
     )
     parser.add_argument(
         "--realm-principal",

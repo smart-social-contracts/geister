@@ -4,6 +4,8 @@ Agent Memory - Persistent memory storage for citizen agents.
 
 Stores agent life stories, actions, and observations in Postgres.
 Each agent has a profile and a journal of memories from their sessions.
+
+Database connection is REQUIRED - agents cannot run without memory.
 """
 
 import json
@@ -12,39 +14,40 @@ import os
 from datetime import datetime
 from typing import Dict, List, Optional
 
-try:
-    import psycopg2
-    from psycopg2.extras import RealDictCursor
-    HAS_PSYCOPG2 = True
-except ImportError:
-    HAS_PSYCOPG2 = False
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
 
 
+class DatabaseConnectionError(Exception):
+    """Raised when database connection fails."""
+    pass
+
+
 class AgentMemory:
-    """Manages persistent memory for citizen agents."""
+    """Manages persistent memory for citizen agents. Requires database connection."""
     
     def __init__(self, agent_id: str, principal: str = None, persona: str = None):
         """
-        Initialize agent memory.
+        Initialize agent memory. Raises DatabaseConnectionError if DB unavailable.
         
         Args:
             agent_id: Unique agent identifier (dfx identity name)
             principal: IC principal for this agent
             persona: Persona type (compliant, exploiter, watchful)
+        
+        Raises:
+            DatabaseConnectionError: If database connection fails
         """
         self.agent_id = agent_id
         self.principal = principal
         self.persona = persona
         self.connection = None
-        self._connected = False
-        
-        if HAS_PSYCOPG2:
-            self._connect()
+        self._connect()
     
     def _connect(self):
-        """Connect to Postgres database."""
+        """Connect to Postgres database. Raises on failure."""
         try:
             self.connection = psycopg2.connect(
                 host=os.getenv('DB_HOST', 'localhost'),
@@ -53,15 +56,9 @@ class AgentMemory:
                 password=os.getenv('DB_PASS', 'ashoka_pass'),
                 port=os.getenv('DB_PORT', '5432')
             )
-            self._connected = True
             logger.info(f"Agent memory connected for {self.agent_id}")
         except Exception as e:
-            logger.warning(f"Could not connect to database: {e}")
-            self._connected = False
-    
-    def is_connected(self) -> bool:
-        """Check if database is connected."""
-        return self._connected and self.connection is not None
+            raise DatabaseConnectionError(f"Database connection required but failed: {e}")
     
     # =========================================================================
     # Profile Management
@@ -73,9 +70,6 @@ class AgentMemory:
         
         Returns the profile dict.
         """
-        if not self.is_connected():
-            return {"agent_id": self.agent_id, "persona": self.persona}
-        
         try:
             with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
                 # Check if profile exists
@@ -118,13 +112,10 @@ class AgentMemory:
         except Exception as e:
             logger.error(f"Error ensuring profile: {e}")
             self.connection.rollback()
-            return {"agent_id": self.agent_id, "persona": self.persona}
+            raise
     
     def get_profile(self) -> Optional[Dict]:
         """Get agent profile."""
-        if not self.is_connected():
-            return None
-        
         try:
             with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
                 cursor.execute(
@@ -135,7 +126,7 @@ class AgentMemory:
                 return dict(result) if result else None
         except Exception as e:
             logger.error(f"Error getting profile: {e}")
-            return None
+            raise
     
     # =========================================================================
     # Memory Storage
@@ -162,12 +153,8 @@ class AgentMemory:
             observations: What the agent noticed or learned
         
         Returns:
-            Memory ID or -1 if not stored
+            Memory ID
         """
-        if not self.is_connected():
-            logger.info(f"[Memory] {action_type}: {action_summary}")
-            return -1
-        
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute("""
@@ -194,7 +181,7 @@ class AgentMemory:
         except Exception as e:
             logger.error(f"Error storing memory: {e}")
             self.connection.rollback()
-            return -1
+            raise
     
     def recall(
         self,
@@ -207,9 +194,6 @@ class AgentMemory:
         
         Returns memories ordered by most recent first.
         """
-        if not self.is_connected():
-            return []
-        
         try:
             with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
                 query = "SELECT * FROM agent_memories WHERE agent_id = %s"
@@ -238,7 +222,7 @@ class AgentMemory:
                 return results
         except Exception as e:
             logger.error(f"Error recalling memories: {e}")
-            return []
+            raise
     
     def recall_recent(self, limit: int = 10) -> List[Dict]:
         """Recall most recent memories."""
@@ -261,9 +245,6 @@ class AgentMemory:
         profile = self.get_profile()
         memories = self.recall(realm_principal=realm_principal, limit=max_memories)
         
-        if not profile and not memories:
-            return "You are a new agent with no prior history in this realm."
-        
         lines = ["YOUR LIFE STORY:"]
         
         if profile:
@@ -275,7 +256,6 @@ class AgentMemory:
             lines.append(f"- You have {len(memories)} memories from past sessions:")
             lines.append("")
             
-            # Group by realm if no specific realm
             for memory in reversed(memories):  # Oldest first for narrative
                 timestamp = memory.get('created_at', '')
                 if isinstance(timestamp, datetime):
@@ -330,7 +310,6 @@ class AgentMemory:
         """Close database connection."""
         if self.connection:
             self.connection.close()
-            self._connected = False
 
 
 # =============================================================================
@@ -338,15 +317,12 @@ class AgentMemory:
 # =============================================================================
 
 def get_agent_memory(agent_id: str, principal: str = None, persona: str = None) -> AgentMemory:
-    """Get an AgentMemory instance for the given agent."""
+    """Get an AgentMemory instance for the given agent. Raises if DB unavailable."""
     return AgentMemory(agent_id, principal, persona)
 
 
 def list_all_agents() -> List[Dict]:
     """List all agent profiles."""
-    if not HAS_PSYCOPG2:
-        return []
-    
     try:
         conn = psycopg2.connect(
             host=os.getenv('DB_HOST', 'localhost'),
@@ -364,29 +340,23 @@ def list_all_agents() -> List[Dict]:
             """)
             return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
-        logger.error(f"Error listing agents: {e}")
-        return []
+        raise DatabaseConnectionError(f"Database connection required: {e}")
     finally:
         if conn:
             conn.close()
 
 
 if __name__ == "__main__":
-    # Demo
     print("Agent Memory System")
     print("=" * 50)
     
-    # Test with a sample agent
-    memory = AgentMemory("test_agent_001", principal="test-principal", persona="compliant")
-    
-    if memory.is_connected():
+    try:
+        memory = AgentMemory("test_agent_001", principal="test-principal", persona="compliant")
         print("✓ Connected to database")
         
-        # Ensure profile
         profile = memory.ensure_profile(display_name="Test Agent")
         print(f"Profile: {profile.get('agent_id')} (sessions: {profile.get('total_sessions')})")
         
-        # Store a memory
         memory_id = memory.remember(
             action_type="test",
             action_summary="Testing the memory system",
@@ -395,14 +365,15 @@ if __name__ == "__main__":
         )
         print(f"Stored memory ID: {memory_id}")
         
-        # Recall memories
         memories = memory.recall_recent(5)
         print(f"Recent memories: {len(memories)}")
         
-        # Get life story prompt
         story = memory.get_life_story_prompt()
         print(f"\nLife Story:\n{story}")
         
         memory.close()
-    else:
-        print("✗ Not connected to database (running in offline mode)")
+        
+    except DatabaseConnectionError as e:
+        print(f"✗ {e}")
+        print("\nDatabase is REQUIRED. Please ensure Postgres is running.")
+        exit(1)
