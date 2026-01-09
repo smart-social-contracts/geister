@@ -16,7 +16,7 @@ jobs:
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       BOOTUP_TIMEOUT_SEC: 600
-      API_URL: https://ashoka-api.realmsgos.dev
+      API_URL: https://geister-api.realmsgos.dev
 
     steps:
       - name: Checkout repository

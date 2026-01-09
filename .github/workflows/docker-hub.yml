@@ -31,10 +31,10 @@ jobs:
         id: tags
         run: |
           if [ "${{ github.ref_name }}" = "main" ]; then
-            echo "tags=smartsocialcontracts/ashoka:latest smartsocialcontracts/ashoka:main" >> $GITHUB_OUTPUT
+            echo "tags=smartsocialcontracts/geister:latest smartsocialcontracts/geister:main" >> $GITHUB_OUTPUT
             echo "pod_type=main" >> $GITHUB_OUTPUT
           else
-            echo "tags=smartsocialcontracts/ashoka:branch" >> $GITHUB_OUTPUT
+            echo "tags=smartsocialcontracts/geister:branch" >> $GITHUB_OUTPUT
             echo "pod_type=branch" >> $GITHUB_OUTPUT
           fi
 
