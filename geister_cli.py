@@ -33,7 +33,8 @@ from rich.console import Console
 # Environment variables configuration
 ENV_VARS = {
     "ASHOKA_API_URL": ("Ashoka API URL", "http://localhost:5000"),
-    "OLLAMA_HOST": ("Ollama server URL", "http://localhost:11434"),
+    "ASHOKA_OLLAMA_URL": ("Stable Ollama URL (via tunnel)", "https://ashoka-ollama.realmsgos.dev"),
+    "OLLAMA_HOST": ("Ollama server URL (direct)", "http://localhost:11434"),
     "GEISTER_NETWORK": ("Default network", "staging"),
     "GEISTER_MODEL": ("Default LLM model", "gpt-oss:20b"),
     "CITIZEN_AGENT_MODEL": ("Model for citizen agent", "gpt-oss:20b"),
@@ -507,15 +508,14 @@ def status(
         color = "green" if ok else "red"
         console.print(f"  Ashoka API ({api_url}): [{color}]{msg}[/{color}]")
         
-        # Check Ollama
-        ollama_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        # Check Ollama - prefer ASHOKA_OLLAMA_URL (stable tunnel) over OLLAMA_HOST (direct)
+        ollama_url = os.getenv("ASHOKA_OLLAMA_URL") or os.getenv("OLLAMA_HOST", "http://localhost:11434")
         try:
             if not ollama_url.startswith("http"):
                 ollama_url = f"https://{ollama_url}"
-            response = requests.get(f"{ollama_url.rstrip('/')}/api/tags", timeout=3)
+            response = requests.get(f"{ollama_url.rstrip('/')}/api/tags", timeout=5)
             if response.status_code == 200:
                 models = response.json().get("models", [])
-                model_names = [m.get("name", "?") for m in models[:3]]
                 console.print(f"  Ollama ({ollama_url}): [green]✅ connected ({len(models)} models)[/green]")
             else:
                 console.print(f"  Ollama ({ollama_url}): [yellow]⚠️ status {response.status_code}[/yellow]")
