@@ -2,21 +2,25 @@
 """
 Geister CLI - Unified command-line interface for AI governance agents.
 
-Combines functionality from:
-- Agent swarm management (generate, run, cleanup)
-- Individual agents (citizen, persona, voter)
-- RunPod management (start, stop, status)
-- API server
-- Direct Ashoka queries
-
-Usage:
-    geister swarm generate 10
+Client commands (connect to remote API):
+    geister ask "What proposals need attention?"
     geister swarm run --persona compliant
     geister agent citizen --name "Alice"
-    geister agent persona --persona exploiter
     geister pod start main
-    geister api
-    geister ask "What proposals need attention?"
+    geister status
+
+Server commands (require local PostgreSQL + Flask):
+    geister server start
+    geister server status
+
+Usage:
+    # Client mode - connect to remote Ashoka API
+    export ASHOKA_API_URL=https://ashoka-api.realmsgos.dev
+    export OLLAMA_HOST=https://xxx.proxy.runpod.net
+    geister ask "hello"
+    
+    # Server mode - run local API server
+    geister server start
 """
 
 import os
@@ -55,13 +59,15 @@ app = typer.Typer(
 console = Console()
 
 # Sub-applications
-swarm_app = typer.Typer(help="Agent swarm management")
-agent_app = typer.Typer(help="Run individual AI agents")
-pod_app = typer.Typer(help="RunPod instance management")
+swarm_app = typer.Typer(help="Agent swarm management (client)")
+agent_app = typer.Typer(help="Run individual AI agents (client)")
+pod_app = typer.Typer(help="RunPod instance management (client)")
+server_app = typer.Typer(help="Server commands (requires PostgreSQL)")
 
 app.add_typer(swarm_app, name="swarm")
 app.add_typer(agent_app, name="agent")
 app.add_typer(pod_app, name="pod")
+app.add_typer(server_app, name="server")
 
 
 # =============================================================================
@@ -320,20 +326,49 @@ def pod_health(
 
 
 # =============================================================================
-# API Command
+# Server Commands (require PostgreSQL)
 # =============================================================================
 
-@app.command("api")
-def run_api(
+@server_app.command("start")
+def server_start(
     host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host to bind to"),
     port: int = typer.Option(5000, "--port", "-p", help="Port to bind to"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode"),
 ):
-    """Start the Ashoka API server."""
+    """Start the Ashoka API server (requires PostgreSQL)."""
     console.print(f"[bold blue]🚀 Starting Ashoka API server on {host}:{port}[/bold blue]")
+    console.print("[dim]Note: This requires PostgreSQL database to be running[/dim]")
     
     from api import app as flask_app
     flask_app.run(host=host, port=port, debug=debug)
+
+
+@server_app.command("status")
+def server_status():
+    """Check if the local Ashoka server is running."""
+    import requests
+    
+    port = 5000
+    url = f"http://localhost:{port}/health"
+    
+    console.print(f"[bold]Checking local server at localhost:{port}...[/bold]")
+    
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            console.print(f"[green]✅ Server is running[/green]")
+            try:
+                data = response.json()
+                console.print(f"   Status: {data.get('status', 'ok')}")
+            except:
+                pass
+        else:
+            console.print(f"[yellow]⚠️ Server responded with status {response.status_code}[/yellow]")
+    except requests.exceptions.ConnectionError:
+        console.print(f"[red]❌ Server is not running on localhost:{port}[/red]")
+        console.print(f"[dim]   Start it with: geister server start[/dim]")
+    except Exception as e:
+        console.print(f"[red]❌ Error checking server: {e}[/red]")
 
 
 # =============================================================================
@@ -399,12 +434,36 @@ def list_personas():
 # Status Command
 # =============================================================================
 
+def _check_connection(url: str, name: str, timeout: int = 3) -> tuple:
+    """Check if a URL is reachable. Returns (is_ok, message)."""
+    import requests
+    try:
+        # Ensure URL has scheme
+        if not url.startswith("http"):
+            url = f"https://{url}"
+        response = requests.get(url if "/health" in url else f"{url.rstrip('/')}/health", timeout=timeout)
+        if response.status_code == 200:
+            return True, "✅ connected"
+        return False, f"⚠️ status {response.status_code}"
+    except requests.exceptions.ConnectionError:
+        return False, "❌ not reachable"
+    except requests.exceptions.Timeout:
+        return False, "❌ timeout"
+    except Exception as e:
+        return False, f"❌ {str(e)[:20]}"
+
+
 @app.command("status")
-def status():
-    """Show current environment variable configuration."""
+def status(
+    check: bool = typer.Option(False, "--check", "-c", help="Check connectivity to API and Ollama"),
+):
+    """Show current configuration and optionally check connectivity."""
+    import requests
     from rich.table import Table
+    from rich.panel import Panel
     
-    table = Table(title="Geister Environment Variables", show_header=True, header_style="bold cyan")
+    # Environment variables table
+    table = Table(title="Environment Variables", show_header=True, header_style="bold cyan")
     table.add_column("Variable", style="bold")
     table.add_column("Description")
     table.add_column("Current Value", style="green")
@@ -429,6 +488,38 @@ def status():
     
     console.print()
     console.print(table)
+    
+    # Connection checks
+    if check:
+        console.print()
+        console.print("[bold]Connection Status:[/bold]")
+        
+        # Check Ashoka API
+        api_url = os.getenv("ASHOKA_API_URL", "http://localhost:5000")
+        ok, msg = _check_connection(api_url, "Ashoka API")
+        color = "green" if ok else "red"
+        console.print(f"  Ashoka API ({api_url}): [{color}]{msg}[/{color}]")
+        
+        # Check Ollama
+        ollama_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        try:
+            if not ollama_url.startswith("http"):
+                ollama_url = f"https://{ollama_url}"
+            response = requests.get(f"{ollama_url.rstrip('/')}/api/tags", timeout=3)
+            if response.status_code == 200:
+                models = response.json().get("models", [])
+                model_names = [m.get("name", "?") for m in models[:3]]
+                console.print(f"  Ollama ({ollama_url}): [green]✅ connected ({len(models)} models)[/green]")
+            else:
+                console.print(f"  Ollama ({ollama_url}): [yellow]⚠️ status {response.status_code}[/yellow]")
+        except requests.exceptions.ConnectionError:
+            console.print(f"  Ollama ({ollama_url}): [red]❌ not reachable[/red]")
+        except Exception as e:
+            console.print(f"  Ollama ({ollama_url}): [red]❌ {str(e)[:30]}[/red]")
+    else:
+        console.print()
+        console.print("[dim]Tip: Use --check to verify connectivity to API and Ollama[/dim]")
+    
     console.print()
 
 
