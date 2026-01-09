@@ -38,13 +38,13 @@ jobs:
           python-version: '3.x'
 
       - name: Install dependencies
-        run: pip install requests runpod
+        run: pip install -e .
 
       - name: Restart pod
         run: |
-          cmd="./pod_manager.py ${{ inputs.pod_type }} restart"
+          cmd="geister pod restart ${{ inputs.pod_type }}"
           if [ "${{ inputs.deploy_new_if_needed }}" = "true" ]; then
-            cmd="$cmd --deploy-new-if-needed"
+            cmd="$cmd --deploy-new"
           fi
           if [ "${{ inputs.verbose }}" = "true" ]; then
             cmd="$cmd --verbose"

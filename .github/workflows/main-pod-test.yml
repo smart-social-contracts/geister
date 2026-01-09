@@ -28,10 +28,10 @@ jobs:
           python-version: '3.x'
 
       - name: Install dependencies
-        run: pip install requests runpod
+        run: pip install -e .
 
       - name: Run remote CI tests
         run: |
-          ./pod_manager.py main restart --deploy-new-if-needed --verbose
+          geister pod restart main --deploy-new --verbose
           ./scripts/health_check.py $BOOTUP_TIMEOUT_SEC "$API_URL"
           ./scripts/run_remote_ci_tests.py "$API_URL"

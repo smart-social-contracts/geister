@@ -66,7 +66,7 @@ class PodManager:
         
         # Set fallback defaults for template-based deployment
         config.setdefault('CONTAINER_DISK', '20')
-        config.setdefault('IMAGE_NAME_BASE', 'docker.io/smartsocialcontracts/ashoka')
+        config.setdefault('IMAGE_NAME_BASE', 'docker.io/smartsocialcontracts/geister')
         config.setdefault('INACTIVITY_TIMEOUT_SECONDS', '3600')
         
         # Validate mandatory configuration
@@ -97,8 +97,8 @@ class PodManager:
             if self.verbose:
                 self._print(f"🔍 Found {len(pods)} total pods")
             
-            # Look for pods with the naming pattern ashoka-{pod_type}-*
-            pod_name_prefix = f"ashoka-{pod_type}-"
+            # Look for pods with the naming pattern geister-{pod_type}-*
+            pod_name_prefix = f"geister-{pod_type}-"
             
             for pod in pods:
                 pod_name = pod.get('name', '')
@@ -422,7 +422,7 @@ class PodManager:
             affordable_gpus.sort(key=lambda x: x['price'])
         
             # Create pod using RunPod SDK - try each GPU until one succeeds
-            pod_name = f"ashoka-{pod_type}-{int(time.time())}"
+            pod_name = f"geister-{pod_type}-{int(time.time())}"
             image_name = self.config.get('IMAGE_NAME_BASE') + ':' + pod_type
             container_disk = int(self.config.get('CONTAINER_DISK', '20'))  # GB for container disk
             
