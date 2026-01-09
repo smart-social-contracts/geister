@@ -14,8 +14,8 @@ Server commands (require local PostgreSQL + Flask):
     geister server status
 
 Usage:
-    # Client mode - connect to remote Ashoka API
-    export ASHOKA_API_URL=https://ashoka-api.realmsgos.dev
+    # Client mode - connect to remote Geister API
+    export GEISTER_API_URL=https://geister-api.realmsgos.dev
     export OLLAMA_HOST=https://xxx.proxy.runpod.net
     geister ask "hello"
     
@@ -32,8 +32,8 @@ from rich.console import Console
 
 # Environment variables configuration
 ENV_VARS = {
-    "ASHOKA_API_URL": ("Ashoka API URL", "http://localhost:5000"),
-    "ASHOKA_OLLAMA_URL": ("Stable Ollama URL (via tunnel)", "https://ashoka-ollama.realmsgos.dev"),
+    "GEISTER_API_URL": ("Geister API URL", "https://geister-api.realmsgos.dev"),
+    "GEISTER_OLLAMA_URL": ("Ollama URL (via tunnel)", "https://geister-ollama.realmsgos.dev"),
     "OLLAMA_HOST": ("Ollama server URL (direct)", "http://localhost:11434"),
     "GEISTER_NETWORK": ("Default network", "staging"),
     "GEISTER_MODEL": ("Default LLM model", "gpt-oss:20b"),
@@ -336,8 +336,8 @@ def server_start(
     port: int = typer.Option(5000, "--port", "-p", help="Port to bind to"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode"),
 ):
-    """Start the Ashoka API server (requires PostgreSQL)."""
-    console.print(f"[bold blue]🚀 Starting Ashoka API server on {host}:{port}[/bold blue]")
+    """Start the Geister API server (requires PostgreSQL)."""
+    console.print(f"[bold blue]🚀 Starting Geister API server on {host}:{port}[/bold blue]")
     console.print("[dim]Note: This requires PostgreSQL database to be running[/dim]")
     
     from api import app as flask_app
@@ -346,7 +346,7 @@ def server_start(
 
 @server_app.command("status")
 def server_status():
-    """Check if the local Ashoka server is running."""
+    """Check if the local Geister server is running."""
     import requests
     
     port = 5000
@@ -378,17 +378,17 @@ def server_status():
 
 @app.command("ask")
 def ask_question(
-    question: str = typer.Argument(..., help="Question to ask Ashoka"),
-    api_url: Optional[str] = typer.Option(None, "--api-url", "-u", help="Ashoka API URL (or set ASHOKA_API_URL)"),
+    question: str = typer.Argument(..., help="Question to ask Geister"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", "-u", help="Geister API URL (or set GEISTER_API_URL)"),
     persona: Optional[str] = typer.Option(None, "--persona", "-p", help="Persona to use"),
     realm_principal: Optional[str] = typer.Option(None, "--realm", "-r", help="Realm principal ID"),
     ollama_url: Optional[str] = typer.Option(None, "--ollama-url", help="Ollama URL (or set OLLAMA_HOST)"),
 ):
-    """Ask Ashoka a question."""
+    """Ask Geister a question."""
     from ashoka_cli import AshokaClient
     
     # Resolve API URL from env or default
-    resolved_api_url = api_url or os.getenv("ASHOKA_API_URL", "http://localhost:5000")
+    resolved_api_url = api_url or os.getenv("GEISTER_API_URL") or os.getenv("ASHOKA_API_URL", "http://localhost:5000")
     # Ensure URL has scheme
     if not resolved_api_url.startswith("http"):
         resolved_api_url = f"https://{resolved_api_url}"
@@ -397,7 +397,7 @@ def ask_question(
     
     client = AshokaClient(base_url=resolved_api_url)
     
-    console.print(f"[dim]Asking Ashoka: {question}[/dim]\n")
+    console.print(f"[dim]Asking Geister: {question}[/dim]\n")
     
     result = client.ask_question(
         question=question,
@@ -407,7 +407,7 @@ def ask_question(
     )
     
     if "answer" in result:
-        console.print(f"[bold green]Ashoka:[/bold green] {result['answer']}")
+        console.print(f"[bold green]Geister:[/bold green] {result['answer']}")
     else:
         console.print(f"[yellow]Response:[/yellow] {result}")
 
@@ -436,7 +436,7 @@ def list_personas():
 # =============================================================================
 
 def _check_api_connection(url: str, timeout: int = 5) -> tuple:
-    """Check if Ashoka API is reachable. Returns (is_ok, message)."""
+    """Check if Geister API is reachable. Returns (is_ok, message)."""
     import requests
     try:
         # Ensure URL has scheme
@@ -502,14 +502,14 @@ def status(
         console.print()
         console.print("[bold]Connection Status:[/bold]")
         
-        # Check Ashoka API
-        api_url = os.getenv("ASHOKA_API_URL", "http://localhost:5000")
+        # Check Geister API
+        api_url = os.getenv("GEISTER_API_URL") or os.getenv("ASHOKA_API_URL", "http://localhost:5000")
         ok, msg = _check_api_connection(api_url)
         color = "green" if ok else "red"
-        console.print(f"  Ashoka API ({api_url}): [{color}]{msg}[/{color}]")
+        console.print(f"  Geister API ({api_url}): [{color}]{msg}[/{color}]")
         
-        # Check Ollama - prefer ASHOKA_OLLAMA_URL (stable tunnel) over OLLAMA_HOST (direct)
-        ollama_url = os.getenv("ASHOKA_OLLAMA_URL") or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        # Check Ollama - prefer GEISTER_OLLAMA_URL (stable tunnel) over OLLAMA_HOST (direct)
+        ollama_url = os.getenv("GEISTER_OLLAMA_URL") or os.getenv("OLLAMA_HOST", "http://localhost:11434")
         try:
             if not ollama_url.startswith("http"):
                 ollama_url = f"https://{ollama_url}"
