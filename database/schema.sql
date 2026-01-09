@@ -22,10 +22,10 @@ CREATE TABLE IF NOT EXISTS realm_status (
 CREATE INDEX IF NOT EXISTS idx_conversations_persona_name ON conversations(persona_name);
 CREATE INDEX IF NOT EXISTS idx_conversations_user_realm_persona ON conversations(user_principal, realm_principal, persona_name);
 
-GRANT ALL PRIVILEGES ON TABLE conversations TO ashoka_user;
-GRANT USAGE, SELECT ON SEQUENCE conversations_id_seq TO ashoka_user;
-GRANT ALL PRIVILEGES ON TABLE realm_status TO ashoka_user;
-GRANT USAGE, SELECT ON SEQUENCE realm_status_id_seq TO ashoka_user;
+GRANT ALL PRIVILEGES ON TABLE conversations TO geister_user;
+GRANT USAGE, SELECT ON SEQUENCE conversations_id_seq TO geister_user;
+GRANT ALL PRIVILEGES ON TABLE realm_status TO geister_user;
+GRANT USAGE, SELECT ON SEQUENCE realm_status_id_seq TO geister_user;
 
 -- Agent memories table for persistent agent life stories
 CREATE TABLE IF NOT EXISTS agent_memories (
@@ -61,7 +61,7 @@ CREATE INDEX IF NOT EXISTS idx_agent_memories_agent_realm ON agent_memories(agen
 CREATE INDEX IF NOT EXISTS idx_agent_memories_created_at ON agent_memories(created_at);
 CREATE INDEX IF NOT EXISTS idx_agent_profiles_agent_id ON agent_profiles(agent_id);
 
-GRANT ALL PRIVILEGES ON TABLE agent_memories TO ashoka_user;
-GRANT USAGE, SELECT ON SEQUENCE agent_memories_id_seq TO ashoka_user;
-GRANT ALL PRIVILEGES ON TABLE agent_profiles TO ashoka_user;
-GRANT USAGE, SELECT ON SEQUENCE agent_profiles_id_seq TO ashoka_user;
+GRANT ALL PRIVILEGES ON TABLE agent_memories TO geister_user;
+GRANT USAGE, SELECT ON SEQUENCE agent_memories_id_seq TO geister_user;
+GRANT ALL PRIVILEGES ON TABLE agent_profiles TO geister_user;
+GRANT USAGE, SELECT ON SEQUENCE agent_profiles_id_seq TO geister_user;

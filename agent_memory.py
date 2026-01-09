@@ -51,9 +51,9 @@ class AgentMemory:
         try:
             self.connection = psycopg2.connect(
                 host=os.getenv('DB_HOST', 'localhost'),
-                database=os.getenv('DB_NAME', 'ashoka_db'),
-                user=os.getenv('DB_USER', 'ashoka_user'),
-                password=os.getenv('DB_PASS', 'ashoka_pass'),
+                database=os.getenv('DB_NAME', 'geister_db'),
+                user=os.getenv('DB_USER', 'geister_user'),
+                password=os.getenv('DB_PASS', 'geister_pass'),
                 port=os.getenv('DB_PORT', '5432')
             )
             logger.info(f"Agent memory connected for {self.agent_id}")
@@ -326,9 +326,9 @@ def list_all_agents() -> List[Dict]:
     try:
         conn = psycopg2.connect(
             host=os.getenv('DB_HOST', 'localhost'),
-            database=os.getenv('DB_NAME', 'ashoka_db'),
-            user=os.getenv('DB_USER', 'ashoka_user'),
-            password=os.getenv('DB_PASS', 'ashoka_pass'),
+            database=os.getenv('DB_NAME', 'geister_db'),
+            user=os.getenv('DB_USER', 'geister_user'),
+            password=os.getenv('DB_PASS', 'geister_pass'),
             port=os.getenv('DB_PORT', '5432')
         )
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
