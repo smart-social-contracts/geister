@@ -434,16 +434,23 @@ def list_personas():
 # Status Command
 # =============================================================================
 
-def _check_connection(url: str, name: str, timeout: int = 3) -> tuple:
-    """Check if a URL is reachable. Returns (is_ok, message)."""
+def _check_api_connection(url: str, timeout: int = 5) -> tuple:
+    """Check if Ashoka API is reachable. Returns (is_ok, message)."""
     import requests
     try:
         # Ensure URL has scheme
         if not url.startswith("http"):
             url = f"https://{url}"
-        response = requests.get(url if "/health" in url else f"{url.rstrip('/')}/health", timeout=timeout)
+        # Root endpoint returns {"status": "ok", ...}
+        response = requests.get(url.rstrip('/'), timeout=timeout)
         if response.status_code == 200:
-            return True, "✅ connected"
+            try:
+                data = response.json()
+                if data.get("status") == "ok":
+                    return True, "✅ connected"
+            except:
+                pass
+            return True, "✅ reachable"
         return False, f"⚠️ status {response.status_code}"
     except requests.exceptions.ConnectionError:
         return False, "❌ not reachable"
@@ -496,7 +503,7 @@ def status(
         
         # Check Ashoka API
         api_url = os.getenv("ASHOKA_API_URL", "http://localhost:5000")
-        ok, msg = _check_connection(api_url, "Ashoka API")
+        ok, msg = _check_api_connection(api_url)
         color = "green" if ok else "red"
         console.print(f"  Ashoka API ({api_url}): [{color}]{msg}[/{color}]")
         
