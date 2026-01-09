@@ -382,9 +382,10 @@ def ask_question(
     persona: Optional[str] = typer.Option(None, "--persona", "-p", help="Persona to use"),
     realm_principal: Optional[str] = typer.Option(None, "--realm", "-r", help="Realm principal ID"),
     ollama_url: Optional[str] = typer.Option(None, "--ollama-url", help="Ollama URL (or set OLLAMA_HOST)"),
+    stream: bool = typer.Option(True, "--stream/--no-stream", help="Stream response in real-time"),
 ):
     """Ask Geister a question."""
-    from ashoka_cli import AshokaClient
+    import requests
     
     # Resolve API URL from env or default
     resolved_api_url = api_url or os.getenv("GEISTER_API_URL", "https://geister-api.realmsgos.dev")
@@ -394,21 +395,52 @@ def ask_question(
     
     resolved_ollama_url = ollama_url or os.getenv("OLLAMA_HOST", "http://localhost:11434")
     
-    client = AshokaClient(base_url=resolved_api_url)
-    
     console.print(f"[dim]Asking Geister: {question}[/dim]\n")
     
-    result = client.ask_question(
-        question=question,
-        persona=persona or "",
-        realm_principal=realm_principal or "",
-        ollama_url=resolved_ollama_url
-    )
-    
-    if "answer" in result:
-        console.print(f"[bold green]Geister:[/bold green] {result['answer']}")
+    if stream:
+        # Use streaming endpoint for real-time feedback
+        try:
+            url = f"{resolved_api_url}/api/ask"
+            payload = {
+                "question": question,
+                "user_principal": "",
+                "realm_principal": realm_principal or "",
+                "persona": persona or "",
+                "ollama_url": resolved_ollama_url,
+                "stream": True
+            }
+            
+            console.print("[bold green]Geister:[/bold green] ", end="")
+            
+            with requests.post(url, json=payload, stream=True, timeout=300) as response:
+                response.raise_for_status()
+                for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
+                    if chunk:
+                        print(chunk, end="", flush=True)
+            
+            print()  # Final newline
+            
+        except requests.exceptions.RequestException as e:
+            console.print(f"[red]Error: {e}[/red]")
     else:
-        console.print(f"[yellow]Response:[/yellow] {result}")
+        # Non-streaming mode with spinner
+        from rich.status import Status
+        from ashoka_cli import AshokaClient
+        
+        client = AshokaClient(base_url=resolved_api_url)
+        
+        with Status("[bold blue]Thinking...[/bold blue]", spinner="dots") as status:
+            result = client.ask_question(
+                question=question,
+                persona=persona or "",
+                realm_principal=realm_principal or "",
+                ollama_url=resolved_ollama_url
+            )
+        
+        if "answer" in result:
+            console.print(f"[bold green]Geister:[/bold green] {result['answer']}")
+        else:
+            console.print(f"[yellow]Response:[/yellow] {result}")
 
 
 # =============================================================================
