@@ -30,8 +30,8 @@ from typing import Optional
 import typer
 from rich.console import Console
 
-# Environment variables configuration
-ENV_VARS = {
+# Environment variables configuration - grouped by mode
+CLIENT_ENV_VARS = {
     "GEISTER_API_URL": ("Geister API URL", "https://geister-api.realmsgos.dev"),
     "GEISTER_OLLAMA_URL": ("Ollama URL", "https://geister-ollama.realmsgos.dev"),
     "GEISTER_NETWORK": ("Default network", "staging"),
@@ -40,10 +40,13 @@ ENV_VARS = {
     "PERSONA_AGENT_MODEL": ("Model for persona agent", "gpt-oss:20b"),
     "VOTER_AGENT_MODEL": ("Model for voter agent", "gpt-oss:20b"),
     "RUNPOD_API_KEY": ("RunPod API key", None),
+}
+
+SERVER_ENV_VARS = {
     "DB_HOST": ("Database host", "localhost"),
-    "DB_NAME": ("Database name", "ashoka_db"),
-    "DB_USER": ("Database user", "ashoka_user"),
-    "DB_PASS": ("Database password", "***"),
+    "DB_NAME": ("Database name", "geister_db"),
+    "DB_USER": ("Database user", "geister_user"),
+    "DB_PASS": ("Database password", None),
     "DB_PORT": ("Database port", "5432"),
     "POD_TYPE": ("Pod type for API auto-shutdown", None),
     "INACTIVITY_TIMEOUT_SECONDS": ("API inactivity timeout (0=disabled)", "0"),
@@ -460,23 +463,17 @@ def _check_api_connection(url: str, timeout: int = 5) -> tuple:
         return False, f"❌ {str(e)[:20]}"
 
 
-@app.command("status")
-def status(
-    check: bool = typer.Option(False, "--check", "-c", help="Check connectivity to API and Ollama"),
-):
-    """Show current configuration and optionally check connectivity."""
-    import requests
+def _make_env_table(title: str, env_vars: dict):
+    """Create a table for environment variables."""
     from rich.table import Table
-    from rich.panel import Panel
     
-    # Environment variables table
-    table = Table(title="Environment Variables", show_header=True, header_style="bold cyan")
+    table = Table(title=title, show_header=True, header_style="bold cyan")
     table.add_column("Variable", style="bold")
     table.add_column("Description")
     table.add_column("Current Value", style="green")
     table.add_column("Default", style="dim")
     
-    for var_name, (description, default) in ENV_VARS.items():
+    for var_name, (description, default) in env_vars.items():
         current = os.getenv(var_name)
         
         # Mask sensitive values
@@ -493,8 +490,20 @@ def status(
         
         table.add_row(var_name, description, display_value, str(default) if default else "-")
     
+    return table
+
+
+@app.command("status")
+def status(
+    check: bool = typer.Option(False, "--check", "-c", help="Check connectivity to API and Ollama"),
+):
+    """Show current configuration and optionally check connectivity."""
+    import requests
+    
     console.print()
-    console.print(table)
+    console.print(_make_env_table("Client Mode", CLIENT_ENV_VARS))
+    console.print()
+    console.print(_make_env_table("Server Mode", SERVER_ENV_VARS))
     
     # Connection checks
     if check:
