@@ -437,7 +437,7 @@ def ask_question(
     # Save to agent memory if enabled
     if memory and full_response:
         try:
-            memory.record_action(
+            memory.remember(
                 action_type="conversation",
                 action_summary=f"Asked: {question[:100]}...",
                 action_details={"question": question, "answer": full_response},
