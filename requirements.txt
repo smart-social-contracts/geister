@@ -17,3 +17,5 @@ opentelemetry-api>=1.15.0
 opentelemetry-sdk>=1.15.0
 runpod
 realms-gos>=0.2.1
+typer>=0.9.0
+rich>=13.0.0
