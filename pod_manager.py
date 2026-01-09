@@ -14,6 +14,7 @@ import time
 import json
 import argparse
 import traceback
+import subprocess
 import runpod
 import requests
 from pathlib import Path
@@ -504,7 +505,7 @@ class PodManager:
             return False
     
     def get_pod_ssh_info(self, pod_type: str) -> dict:
-        """Get SSH connection info for a pod"""
+        """Get SSH connection info for a pod using RunPod's SSH proxy"""
         try:
             pods = runpod.get_pods()
             pod_name_prefix = f"geister-{pod_type}-"
@@ -512,16 +513,18 @@ class PodManager:
             for pod in pods:
                 pod_name = pod.get('name', '')
                 if pod_name.startswith(pod_name_prefix):
-                    runtime = pod.get('runtime', {})
-                    if runtime:
-                        ports = runtime.get('ports', [])
-                        for port in ports:
-                            if port.get('privatePort') == 22:
-                                return {
-                                    'host': port.get('ip'),
-                                    'port': port.get('publicPort'),
-                                    'pod_id': pod.get('id')
-                                }
+                    pod_id = pod.get('id')
+                    machine = pod.get('machine', {})
+                    machine_id = machine.get('podHostId') if machine else None
+                    
+                    if pod_id:
+                        # RunPod SSH proxy format: <pod_id>@ssh.runpod.io
+                        return {
+                            'pod_id': pod_id,
+                            'machine_id': machine_id,
+                            'ssh_host': 'ssh.runpod.io',
+                            'ssh_user': pod_id  # Just pod_id for basic SSH
+                        }
             return None
         except Exception as e:
             self._print(f"❌ Error getting SSH info: {e}", force=True)
@@ -537,10 +540,10 @@ class PodManager:
             self._print("Make sure the pod is running and has SSH enabled", force=True)
             return False
         
-        ssh_host = ssh_info['host']
-        ssh_port = ssh_info['port']
+        pod_id = ssh_info['pod_id']
+        ssh_host = ssh_info['ssh_host']
         
-        self._print(f"SSH: {ssh_host}:{ssh_port}")
+        self._print(f"SSH: {pod_id}@{ssh_host}")
         
         # Files to sync (Python code only, exclude heavy directories)
         exclude_args = [
@@ -555,17 +558,18 @@ class PodManager:
             "--exclude=node_modules",
         ]
         
-        # rsync command
+        # rsync command using RunPod SSH proxy
+        ssh_key = os.path.expanduser("~/.ssh/id_ed25519")
         rsync_cmd = [
             "rsync", "-avz", "--progress",
-            "-e", f"ssh -p {ssh_port} -o StrictHostKeyChecking=no",
+            "-e", f"ssh -i {ssh_key} -o StrictHostKeyChecking=no",
             *exclude_args,
             f"{source_dir}/",
-            f"root@{ssh_host}:/workspace/geister/"
+            f"{pod_id}@{ssh_host}:/workspace/geister/"
         ]
         
         try:
-            self._print(f"Running: {' '.join(rsync_cmd[:5])}...")
+            self._print(f"Running rsync to {pod_id}@{ssh_host}...")
             result = subprocess.run(rsync_cmd, capture_output=True, text=True, timeout=120)
             
             if result.returncode == 0:
@@ -593,20 +597,23 @@ class PodManager:
             self._print("❌ Could not get SSH connection info", force=True)
             return False
         
-        ssh_host = ssh_info['host']
-        ssh_port = ssh_info['port']
+        pod_id = ssh_info['pod_id']
+        ssh_host = ssh_info['ssh_host']
         
         # Command to restart Flask (kill existing and start new)
         restart_cmd = "pkill -f 'python.*api.py' ; cd /workspace/geister && nohup python api.py > /var/log/api.log 2>&1 &"
         
+        ssh_key = os.path.expanduser("~/.ssh/id_ed25519")
         ssh_cmd = [
-            "ssh", "-p", str(ssh_port),
+            "ssh",
+            "-i", ssh_key,
             "-o", "StrictHostKeyChecking=no",
-            f"root@{ssh_host}",
+            f"{pod_id}@{ssh_host}",
             restart_cmd
         ]
         
         try:
+            self._print(f"Sending restart command to {pod_id}@{ssh_host}...")
             result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=30)
             self._print("✅ API restart command sent!")
             if not self.verbose:
