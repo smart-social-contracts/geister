@@ -215,6 +215,8 @@ def realm_status(network: str = "staging", realm_folder: str = ".") -> str:
 
 def db_get(entity_type: str, entity_id: Optional[str] = None, network: str = "staging", realm_folder: str = ".") -> str:
     """Get entities from the realm database. If entity_id is provided, get a specific entity."""
+    # Normalize entity_type to title case (e.g., 'codex' -> 'Codex')
+    entity_type = entity_type.title()
     subcommand = ["db", "-f", realm_folder, "get", entity_type]
     if entity_id:
         subcommand.append(entity_id)
