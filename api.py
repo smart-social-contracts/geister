@@ -1297,7 +1297,7 @@ if __name__ == '__main__':
     start_scheduler()
     
     try:
-        app.run(host='0.0.0.0', port=5000)
+        app.run(host='0.0.0.0', port=5000, threaded=True)
     finally:
         # Ensure cleanup on exit
         stop_inactivity_monitor()
