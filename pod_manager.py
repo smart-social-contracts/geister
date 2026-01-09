@@ -503,6 +503,119 @@ class PodManager:
             traceback.print_exc()
             return False
     
+    def get_pod_ssh_info(self, pod_type: str) -> dict:
+        """Get SSH connection info for a pod"""
+        try:
+            pods = runpod.get_pods()
+            pod_name_prefix = f"geister-{pod_type}-"
+            
+            for pod in pods:
+                pod_name = pod.get('name', '')
+                if pod_name.startswith(pod_name_prefix):
+                    runtime = pod.get('runtime', {})
+                    if runtime:
+                        ports = runtime.get('ports', [])
+                        for port in ports:
+                            if port.get('privatePort') == 22:
+                                return {
+                                    'host': port.get('ip'),
+                                    'port': port.get('publicPort'),
+                                    'pod_id': pod.get('id')
+                                }
+            return None
+        except Exception as e:
+            self._print(f"❌ Error getting SSH info: {e}", force=True)
+            return None
+    
+    def sync_pod(self, pod_type: str, source_dir: str = ".") -> bool:
+        """Sync local code to pod via rsync over SSH (fast deployment)"""
+        self._print(f"Syncing code to {pod_type} pod...")
+        
+        ssh_info = self.get_pod_ssh_info(pod_type)
+        if not ssh_info:
+            self._print("❌ Could not get SSH connection info", force=True)
+            self._print("Make sure the pod is running and has SSH enabled", force=True)
+            return False
+        
+        ssh_host = ssh_info['host']
+        ssh_port = ssh_info['port']
+        
+        self._print(f"SSH: {ssh_host}:{ssh_port}")
+        
+        # Files to sync (Python code only, exclude heavy directories)
+        exclude_args = [
+            "--exclude=.git",
+            "--exclude=__pycache__",
+            "--exclude=*.pyc",
+            "--exclude=venv",
+            "--exclude=.venv",
+            "--exclude=env",
+            "--exclude=.env",
+            "--exclude=*.log",
+            "--exclude=node_modules",
+        ]
+        
+        # rsync command
+        rsync_cmd = [
+            "rsync", "-avz", "--progress",
+            "-e", f"ssh -p {ssh_port} -o StrictHostKeyChecking=no",
+            *exclude_args,
+            f"{source_dir}/",
+            f"root@{ssh_host}:/workspace/geister/"
+        ]
+        
+        try:
+            self._print(f"Running: {' '.join(rsync_cmd[:5])}...")
+            result = subprocess.run(rsync_cmd, capture_output=True, text=True, timeout=120)
+            
+            if result.returncode == 0:
+                self._print("✅ Code synced successfully!")
+                if not self.verbose:
+                    print("SYNCED")
+                return True
+            else:
+                self._print(f"❌ rsync failed: {result.stderr}", force=True)
+                return False
+                
+        except subprocess.TimeoutExpired:
+            self._print("❌ rsync timed out", force=True)
+            return False
+        except Exception as e:
+            self._print(f"❌ Sync failed: {e}", force=True)
+            return False
+    
+    def restart_api(self, pod_type: str) -> bool:
+        """Restart just the Flask API on the pod (no Docker rebuild)"""
+        self._print(f"Restarting API on {pod_type} pod...")
+        
+        ssh_info = self.get_pod_ssh_info(pod_type)
+        if not ssh_info:
+            self._print("❌ Could not get SSH connection info", force=True)
+            return False
+        
+        ssh_host = ssh_info['host']
+        ssh_port = ssh_info['port']
+        
+        # Command to restart Flask (kill existing and start new)
+        restart_cmd = "pkill -f 'python.*api.py' ; cd /workspace/geister && nohup python api.py > /var/log/api.log 2>&1 &"
+        
+        ssh_cmd = [
+            "ssh", "-p", str(ssh_port),
+            "-o", "StrictHostKeyChecking=no",
+            f"root@{ssh_host}",
+            restart_cmd
+        ]
+        
+        try:
+            result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=30)
+            self._print("✅ API restart command sent!")
+            if not self.verbose:
+                print("RESTARTED")
+            return True
+        except Exception as e:
+            self._print(f"❌ Restart failed: {e}", force=True)
+            return False
+    
     def terminate_pod(self, pod_type: str) -> bool:
         """Terminate (delete) a pod using RunPod SDK"""
         self._print(f"Terminating {pod_type} pod...")
@@ -758,7 +871,7 @@ API Usage Examples:
     
     parser.add_argument('pod_type', choices=['main', 'branch'], 
                        help='Pod type to manage')
-    parser.add_argument('action', choices=['start', 'stop', 'restart', 'status', 'deploy', 'terminate', 'ask', 'personas', 'persona', 'realm-status', 'health'],
+    parser.add_argument('action', choices=['start', 'stop', 'restart', 'status', 'deploy', 'terminate', 'sync', 'restart-api', 'ask', 'personas', 'persona', 'realm-status', 'health'],
                        help='Action to perform')
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Enable verbose output (default: concise)')
@@ -802,6 +915,10 @@ API Usage Examples:
             success = manager.deploy_pod(args.pod_type)
         elif args.action == 'terminate':
             success = manager.terminate_pod(args.pod_type)
+        elif args.action == 'sync':
+            success = manager.sync_pod(args.pod_type)
+        elif args.action == 'restart-api':
+            success = manager.restart_api(args.pod_type)
         elif args.action == 'ask':
             # Get question from either --question or --question-file
             question = None

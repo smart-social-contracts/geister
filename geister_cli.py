@@ -298,6 +298,30 @@ def pod_health(
     raise typer.Exit(0 if success else 1)
 
 
+@pod_app.command("sync")
+def pod_sync(
+    pod_type: str = typer.Argument("main", help="Pod type (main or branch)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+):
+    """Sync local code to pod via SSH (fast deployment, no Docker rebuild)."""
+    from pod_manager import PodManager
+    manager = PodManager(verbose=verbose)
+    success = manager.sync_pod(pod_type)
+    raise typer.Exit(0 if success else 1)
+
+
+@pod_app.command("restart-api")
+def pod_restart_api(
+    pod_type: str = typer.Argument("main", help="Pod type (main or branch)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+):
+    """Restart Flask API on pod (no Docker rebuild)."""
+    from pod_manager import PodManager
+    manager = PodManager(verbose=verbose)
+    success = manager.restart_api(pod_type)
+    raise typer.Exit(0 if success else 1)
+
+
 # =============================================================================
 # Server Commands (require PostgreSQL)
 # =============================================================================
