@@ -373,6 +373,7 @@ def ask_question(
     # Handle agent memory if agent_id is provided
     memory = None
     display_name = agent_name
+    agent_background = None
     if agent_id:
         try:
             from agent_memory import AgentMemory
@@ -386,11 +387,16 @@ def ask_question(
                     display_name = profile.get('display_name') or agent_id
                 if not persona:
                     persona = profile.get('persona')
+                # Get background metadata
+                agent_background = profile.get('metadata')
             
-            # Update profile if new values provided
-            if agent_name:
-                memory.ensure_profile(display_name=agent_name)
-                display_name = agent_name
+            # Update/create profile if new values provided (generates background if new)
+            if agent_name or not profile:
+                profile = memory.ensure_profile(display_name=agent_name)
+                if agent_name:
+                    display_name = agent_name
+                if not agent_background:
+                    agent_background = profile.get('metadata')
             
             console.print(f"[dim]🤖 Agent: {display_name or agent_id} ({persona or 'default'})[/dim]")
         except Exception as e:
@@ -411,6 +417,7 @@ def ask_question(
                 "realm_principal": realm_principal or "",
                 "persona": persona or "",
                 "agent_name": display_name or "",
+                "agent_background": agent_background,
                 "ollama_url": resolved_ollama_url,
                 "stream": True
             }

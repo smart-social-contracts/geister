@@ -231,14 +231,37 @@ def build_user_context(user_principal, realm_principal):
         log(f"Error building user context: {e}")
         return f"\n=== USER CONTEXT ===\nUser: {user_principal[:8]}...\nError loading user history\n\n"
 
-def build_prompt(user_principal, realm_principal, question, realm_status=None, persona_name=None, agent_name=None):
+def build_prompt(user_principal, realm_principal, question, realm_status=None, persona_name=None, agent_name=None, agent_background=None):
     """Build complete prompt with persona + structured context + history + question"""
     # Get persona content using PersonaManager
     actual_persona_name, persona_content = persona_manager.get_persona_or_default(persona_name)
     
     # If agent_name is provided, add identity instruction to persona
     if agent_name:
-        persona_content = f"Your name is {agent_name}. When asked about your name or identity, respond as {agent_name}.\n\n{persona_content}"
+        identity = f"Your name is {agent_name}. When asked about your name or identity, respond as {agent_name}."
+        
+        # Add background if available
+        if agent_background and isinstance(agent_background, dict):
+            bg_parts = []
+            if agent_background.get('age'):
+                bg_parts.append(f"You are {agent_background['age']} years old")
+            if agent_background.get('occupation'):
+                bg_parts.append(f"work as a {agent_background['occupation']}")
+            if agent_background.get('education'):
+                bg_parts.append(f"have {agent_background['education']} education")
+            if agent_background.get('wealth'):
+                bg_parts.append(f"are {agent_background['wealth'].replace('_', ' ')} class")
+            if agent_background.get('family'):
+                bg_parts.append(f"are {agent_background['family'].replace('_', ' ')}")
+            if agent_background.get('location'):
+                bg_parts.append(f"live in a {agent_background['location']} area")
+            if agent_background.get('health'):
+                bg_parts.append(f"have {agent_background['health']} health")
+            
+            if bg_parts:
+                identity += f"\n\nYour background: You {', '.join(bg_parts)}."
+        
+        persona_content = f"{identity}\n\n{persona_content}"
     
     # Build structured realm context
     realm_context = build_structured_realm_context(realm_status)
@@ -369,6 +392,7 @@ def ask():
     realm_status = data.get('realm_status')  # Optional realm context
     persona_name = data.get('persona')  # Optional persona name
     agent_name = data.get('agent_name')  # Optional agent display name
+    agent_background = data.get('agent_background')  # Optional agent background (age, wealth, etc.)
     ollama_url = data.get('ollama_url', 'http://localhost:11434')
     
     # Validate required fields - user_principal can be empty for anonymous users
@@ -406,7 +430,7 @@ def ask():
             realm_status = None
     
     # Build complete prompt with persona and realm context
-    prompt = build_prompt(user_principal, realm_principal, question, realm_status, persona_name, agent_name)
+    prompt = build_prompt(user_principal, realm_principal, question, realm_status, persona_name, agent_name, agent_background)
     
     # Log the complete prompt for debugging
     log("\n" + "="*80)

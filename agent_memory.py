@@ -11,6 +11,7 @@ Database connection is REQUIRED - agents cannot run without memory.
 import json
 import logging
 import os
+import random
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -18,6 +19,52 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
+
+
+def generate_agent_background(persona: str = None) -> Dict:
+    """Generate random background data for an agent based on persona."""
+    
+    # Base distributions
+    ages = list(range(18, 75))
+    wealth_levels = ["poor", "lower_middle", "middle", "upper_middle", "wealthy"]
+    education_levels = ["none", "primary", "secondary", "vocational", "university", "postgraduate"]
+    health_levels = ["poor", "fair", "good", "excellent"]
+    occupations = [
+        "farmer", "teacher", "engineer", "merchant", "artist", "healthcare_worker",
+        "civil_servant", "laborer", "entrepreneur", "retired", "student", "unemployed"
+    ]
+    family_statuses = ["single", "married", "married_with_children", "divorced", "widowed"]
+    locations = ["rural", "suburban", "urban"]
+    
+    # Persona-influenced distributions
+    if persona == "exploiter":
+        # Exploiters tend to be younger, more educated, urban
+        age = random.choice(range(25, 50))
+        wealth = random.choices(wealth_levels, weights=[5, 10, 30, 35, 20])[0]
+        education = random.choices(education_levels, weights=[2, 5, 15, 20, 40, 18])[0]
+        location = random.choices(locations, weights=[10, 30, 60])[0]
+    elif persona == "watchful":
+        # Watchful citizens tend to be older, experienced, varied backgrounds
+        age = random.choice(range(35, 70))
+        wealth = random.choices(wealth_levels, weights=[15, 25, 35, 20, 5])[0]
+        education = random.choices(education_levels, weights=[5, 10, 25, 25, 25, 10])[0]
+        location = random.choices(locations, weights=[30, 40, 30])[0]
+    else:  # compliant or default
+        # Compliant citizens - average distribution
+        age = random.choice(ages)
+        wealth = random.choices(wealth_levels, weights=[15, 25, 35, 20, 5])[0]
+        education = random.choices(education_levels, weights=[5, 15, 30, 20, 25, 5])[0]
+        location = random.choices(locations, weights=[25, 40, 35])[0]
+    
+    return {
+        "age": age,
+        "wealth": wealth,
+        "education": education,
+        "health": random.choice(health_levels),
+        "occupation": random.choice(occupations),
+        "family": random.choice(family_statuses),
+        "location": location
+    }
 
 
 class DatabaseConnectionError(Exception):
@@ -91,7 +138,9 @@ class AgentMemory:
                     """, (self.persona, self.agent_id))
                     profile = cursor.fetchone()
                 else:
-                    # Create new profile
+                    # Create new profile with auto-generated background
+                    if not metadata:
+                        metadata = generate_agent_background(self.persona)
                     cursor.execute("""
                         INSERT INTO agent_profiles 
                         (agent_id, principal, display_name, persona, last_active_at, total_sessions, metadata)
@@ -102,7 +151,7 @@ class AgentMemory:
                         self.principal,
                         display_name or self.agent_id,
                         self.persona,
-                        json.dumps(metadata) if metadata else None
+                        json.dumps(metadata)
                     ))
                     profile = cursor.fetchone()
                 
