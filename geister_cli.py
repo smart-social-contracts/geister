@@ -388,7 +388,7 @@ def ask_question(
     from ashoka_cli import AshokaClient
     
     # Resolve API URL from env or default
-    resolved_api_url = api_url or os.getenv("GEISTER_API_URL") or os.getenv("ASHOKA_API_URL", "http://localhost:5000")
+    resolved_api_url = api_url or os.getenv("GEISTER_API_URL", "https://geister-api.realmsgos.dev")
     # Ensure URL has scheme
     if not resolved_api_url.startswith("http"):
         resolved_api_url = f"https://{resolved_api_url}"
@@ -503,13 +503,13 @@ def status(
         console.print("[bold]Connection Status:[/bold]")
         
         # Check Geister API
-        api_url = os.getenv("GEISTER_API_URL") or os.getenv("ASHOKA_API_URL", "http://localhost:5000")
+        api_url = os.getenv("GEISTER_API_URL", "https://geister-api.realmsgos.dev")
         ok, msg = _check_api_connection(api_url)
         color = "green" if ok else "red"
         console.print(f"  Geister API ({api_url}): [{color}]{msg}[/{color}]")
         
-        # Check Ollama - prefer GEISTER_OLLAMA_URL (stable tunnel) over OLLAMA_HOST (direct)
-        ollama_url = os.getenv("GEISTER_OLLAMA_URL") or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        # Check Ollama - prefer GEISTER_OLLAMA_URL (tunnel) over OLLAMA_HOST (direct)
+        ollama_url = os.getenv("GEISTER_OLLAMA_URL", "https://geister-ollama.realmsgos.dev")
         try:
             if not ollama_url.startswith("http"):
                 ollama_url = f"https://{ollama_url}"
