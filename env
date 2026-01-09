@@ -5,4 +5,4 @@ MIN_GPU_PRICE=0.05
 GPU_COUNT=1
 
 # Use Cloudflare tunnel DNS
-API_URL=https://ashoka-api.realmsgos.dev
+API_URL=https://geister-api.realmsgos.dev 

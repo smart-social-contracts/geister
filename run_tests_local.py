@@ -13,7 +13,7 @@ import sys
 import subprocess
 import traceback
 
-API_URL = os.environ.get('API_URL', 'https://ashoka-api.realmsgos.dev')
+API_URL = os.environ.get('API_URL', 'https://geister-api.realmsgos.dev ')
 REALM_NETWORK = os.environ.get('REALM_NETWORK', 'staging')
 REALM_FOLDER = os.environ.get('REALM_FOLDER', '.')
 

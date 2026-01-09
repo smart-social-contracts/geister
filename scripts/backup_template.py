@@ -98,8 +98,8 @@ def main():
         description="Backup RunPod template configuration",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument('--template-name', '-t', type=str, default='ashoka1',
-                       help='Template name to backup (default: ashoka1)')
+    parser.add_argument('--template-name', '-t', type=str, default='geister-template-1',
+                       help='Template name to backup (default: geister-template-1)')
     parser.add_argument('--list', '-l', action='store_true',
                        help='List all available templates')
     parser.add_argument('--output', '-o', type=str, default=None,

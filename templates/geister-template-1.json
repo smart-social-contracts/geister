@@ -1,7 +1,7 @@
 {
-  "id": "1fnzgryfq6",
-  "name": "ashoka1",
-  "imageName": "docker.io/smartsocialcontracts/ashoka:latest",
+  "id": "mli5ubi3cf",
+  "name": "geister-template-1",
+  "imageName": "docker.io/smartsocialcontracts/geister:latest",
   "dockerArgs": "",
   "containerDiskInGb": 100,
   "volumeInGb": 300,

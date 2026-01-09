@@ -167,7 +167,7 @@ def load_env_config() -> str:
         return url.rstrip('/')
     
     # Default to production API
-    return "https://ashoka-api.realmsgos.dev"
+    return "https://geister-api.realmsgos.dev "
 
 
 def cmd_ask(args, client: AshokaClient):

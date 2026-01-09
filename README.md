@@ -1,6 +1,6 @@
 # Geister
 
-AI-powered governance agents for Internet Computer Protocol realms and DAOs. Geister provides intelligent responses to governance questions using multiple AI personas, powered by LLMs.
+AI-powered governance agents for [Realms GOS](https://github.com/smart-social-contracts/realms). Geister provides intelligent responses to governance questions using multiple AI personas, powered by LLMs.
 
 ## Features
 
