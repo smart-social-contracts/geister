@@ -213,10 +213,13 @@ def realm_status(network: str = "staging", realm_folder: str = ".") -> str:
     )
 
 
-def db_get(entity_type: str, network: str = "staging", realm_folder: str = ".") -> str:
-    """Get entities from the realm database."""
+def db_get(entity_type: str, entity_id: Optional[str] = None, network: str = "staging", realm_folder: str = ".") -> str:
+    """Get entities from the realm database. If entity_id is provided, get a specific entity."""
+    subcommand = ["db", "-f", realm_folder, "get", entity_type]
+    if entity_id:
+        subcommand.append(entity_id)
     return _run_realms_cli(
-        subcommand=["db", "-f", realm_folder, "get", entity_type],
+        subcommand=subcommand,
         network=network,
         realm_folder=realm_folder
     )
@@ -407,7 +410,7 @@ REALM_TOOLS = [
         "type": "function",
         "function": {
             "name": "db_get",
-            "description": "Get entities from the realm database. Query any entity type including: User, Proposal, Vote, Transfer, Mandate, Task, Organization, Codex, Dispute, etc.",
+            "description": "Get entities from the realm database. Without entity_id, lists all entities of that type. With entity_id, gets a specific entity.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -415,6 +418,10 @@ REALM_TOOLS = [
                         "type": "string",
                         "description": "Type of entity to query from the realm database",
                         "enum": ["Balance", "Codex", "Dispute", "Identity", "Invoice", "Land", "License", "Mandate", "Organization", "Proposal", "Realm", "Task", "Transfer", "Treasury", "User", "UserProfile", "Vote"]
+                    },
+                    "entity_id": {
+                        "type": "string",
+                        "description": "Optional ID of a specific entity to retrieve. If omitted, lists all entities of the type."
                     }
                 },
                 "required": ["entity_type"]
