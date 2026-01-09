@@ -128,107 +128,80 @@ def swarm_cleanup(
 # Agent Commands
 # =============================================================================
 
-@agent_app.command("citizen")
-def agent_citizen(
-    name: Optional[str] = typer.Option(None, "--name", "-n", help="Agent name"),
-    network: str = typer.Option(DEFAULT_NETWORK, "--network", help="Network to connect to"),
-    realm_folder: str = typer.Option(DEFAULT_REALM_FOLDER, "--realm-folder", "-f", help="Path to realm folder"),
-    model: str = typer.Option(DEFAULT_MODEL, "--model", "-m", help="Ollama model to use"),
-    profile_picture: Optional[str] = typer.Option(None, "--profile-picture", "-p", help="Profile picture URL"),
-):
-    """Run a citizen agent that joins a realm and sets up profile."""
-    from citizen_agent import run_citizen_agent
-    
+@agent_app.command("list")
+def agent_list():
+    """List all agents with their profiles."""
     try:
-        run_citizen_agent(
-            name=name,
-            network=network,
-            realm_folder=realm_folder,
-            model=model,
-            profile_picture_url=profile_picture
-        )
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Agent interrupted by user[/yellow]")
-        raise typer.Exit(1)
+        from agent_memory import list_all_agents
+        agents = list_all_agents()
+        
+        if not agents:
+            console.print("[dim]No agents with profiles yet.[/dim]")
+            console.print("[dim]Use 'geister ask --agent-id <id>' to create agent memories.[/dim]")
+            return
+        
+        console.print("\n[bold]Registered Agents:[/bold]")
+        console.print("=" * 60)
+        for agent in agents:
+            name = agent.get('display_name') or agent['agent_id']
+            persona = agent.get('persona') or 'default'
+            sessions = agent.get('total_sessions', 0)
+            console.print(f"  🤖 [bold]{name}[/bold] ({agent['agent_id']})")
+            console.print(f"     Persona: {persona} | Sessions: {sessions}")
+        console.print()
+    except Exception as e:
+        console.print(f"[yellow]Could not list agents: {e}[/yellow]")
+        console.print("[dim]Database may not be available.[/dim]")
 
 
-@agent_app.command("persona")
-def agent_persona(
-    persona: str = typer.Option("compliant", "--persona", "-p", help="Persona type (compliant, exploiter, watchful)"),
-    name: Optional[str] = typer.Option(None, "--name", "-n", help="Agent name"),
-    network: str = typer.Option(DEFAULT_NETWORK, "--network", help="Network to connect to"),
-    realm_folder: str = typer.Option(DEFAULT_REALM_FOLDER, "--realm-folder", "-f", help="Path to realm folder"),
-    model: str = typer.Option(DEFAULT_MODEL, "--model", "-m", help="Ollama model to use"),
-    agent_id: Optional[str] = typer.Option(None, "--agent-id", help="Agent ID for memory persistence"),
-    realm_principal: Optional[str] = typer.Option(None, "--realm-principal", help="Realm canister ID"),
-    list_personas: bool = typer.Option(False, "--list", "-l", help="List available personas"),
+@agent_app.command("run")
+def agent_run(
+    agent_id: str = typer.Argument(..., help="Agent ID (e.g., swarm_agent_001)"),
+    persona: str = typer.Option("compliant", "--persona", "-p", help="Persona type"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="Display name for the agent"),
+    realm: Optional[str] = typer.Option(None, "--realm", "-r", help="Realm principal ID"),
 ):
-    """Run a persona agent with specific behavioral patterns."""
-    if list_personas:
-        from citizen_personas import get_personas
-        personas = get_personas()
-        console.print("\n[bold]Available Citizen Personas:[/bold]")
-        console.print("=" * 50)
-        for pname, p in sorted(personas.items()):
-            console.print(f"\n{p.emoji} [bold]{p.name}[/bold]")
-            console.print(f"   {p.description}")
-            console.print(f"   [dim]Motivation: {p.motivation}[/dim]")
-        return
-    
-    from persona_agent import run_persona_agent
-    from citizen_personas import get_persona
-    import random
-    
-    # Generate agent name if not provided
-    agent_name = name
-    if not agent_name:
-        suffixes = ["Alpha", "Beta", "Gamma", "Delta", "Omega"]
-        p = get_persona(persona)
-        if p:
-            agent_name = f"{p.name}{random.choice(suffixes)}"
-        else:
-            agent_name = f"Agent{random.randint(100, 999)}"
-    
+    """Start an interactive chat session with an agent."""
     try:
-        run_persona_agent(
-            persona_name=persona,
-            agent_name=agent_name,
-            network=network,
-            realm_folder=realm_folder,
-            model=model,
-            agent_id=agent_id,
-            realm_principal=realm_principal
-        )
+        from agent_memory import AgentMemory
+        
+        memory = AgentMemory(agent_id, persona=persona)
+        if name:
+            memory.ensure_profile(display_name=name)
+        
+        display_name = name or agent_id
+        console.print(f"\n[bold green]🤖 Agent Session: {display_name}[/bold green]")
+        console.print(f"[dim]Persona: {persona} | Agent ID: {agent_id}[/dim]")
+        console.print("[dim]Type 'exit' or Ctrl+C to end session[/dim]\n")
+        
+        while True:
+            try:
+                user_input = input("You: ").strip()
+                if user_input.lower() in ('exit', 'quit', 'q'):
+                    break
+                if not user_input:
+                    continue
+                
+                # Use geister ask with agent context
+                import subprocess
+                cmd = [
+                    "geister", "ask", user_input,
+                    "--agent-id", agent_id,
+                    "--persona", persona,
+                ]
+                if realm:
+                    cmd.extend(["--realm", realm])
+                
+                subprocess.run(cmd)
+                print()
+                
+            except EOFError:
+                break
+                
     except KeyboardInterrupt:
-        console.print("\n[yellow]Agent interrupted by user[/yellow]")
-        raise typer.Exit(1)
-
-
-@agent_app.command("voter")
-def agent_voter(
-    voter_id: Optional[str] = typer.Option(None, "--voter-id", "-i", help="Voter principal ID"),
-    proposal: Optional[str] = typer.Option(None, "--proposal", "-p", help="Specific proposal to vote on"),
-    network: str = typer.Option(DEFAULT_NETWORK, "--network", "-n", help="Network to connect to"),
-    realm_folder: str = typer.Option(DEFAULT_REALM_FOLDER, "--realm-folder", "-f", help="Path to realm folder"),
-    model: str = typer.Option(DEFAULT_MODEL, "--model", "-m", help="Ollama model to use"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Analyze but don't vote"),
-    strategy: str = typer.Option("balanced", "--strategy", "-s", help="Voting strategy (balanced, progressive, conservative)"),
-):
-    """Run a voter agent that reviews and votes on proposals."""
-    from voter_agent import run_voter_agent
-    
-    try:
-        run_voter_agent(
-            voter_id=voter_id,
-            proposal_id=proposal,
-            network=network,
-            realm_folder=realm_folder,
-            model=model,
-            dry_run=dry_run,
-            voting_strategy=strategy
-        )
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Agent interrupted by user[/yellow]")
+        console.print("\n[yellow]Session ended[/yellow]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
 
