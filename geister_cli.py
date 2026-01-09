@@ -49,7 +49,7 @@ SERVER_ENV_VARS = {
     "DB_PASS": ("Database password", None),
     "DB_PORT": ("Database port", "5432"),
     "POD_TYPE": ("Pod type for API auto-shutdown", None),
-    "INACTIVITY_TIMEOUT_SECONDS": ("API inactivity timeout (0=disabled)", "0"),
+    "INACTIVITY_TIMEOUT_SECONDS": ("API inactivity timeout (seconds)", "3600"),
 }
 
 # Initialize typer app and console
