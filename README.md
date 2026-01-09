@@ -1,126 +1,174 @@
-# Ashoka
+# Geister
 
-An AI-powered governance advisor for Internet Computer Protocol realms and DAOs. Ashoka provides intelligent responses to governance questions using multiple AI personas, powered by LLMs and retrieval-augmented generation (RAG).
+AI-powered governance agents for Internet Computer Protocol realms and DAOs. Geister provides intelligent responses to governance questions using multiple AI personas, powered by LLMs.
 
 ## Features
 
-- **Multi-Persona AI Governance**: Choose from specialized personas (advisor, facilitator, analyst)
-- **Realm Status Integration**: Context-aware responses using real-time realm data
-- **CLI & HTTP API**: Flexible interfaces for different use cases
+- **Multi-Persona AI Agents**: Specialized personas (Compliant, Exploiter, Watchful)
+- **Realm Integration**: Context-aware responses using real-time realm data
+- **Client/Server Architecture**: Run locally or connect to remote API
 - **RunPod Cloud Deployment**: Scalable GPU-powered infrastructure
-- **Conversation History**: Track governance discussions and decisions
+- **Agent Swarm**: Run multiple agents in parallel
+
+## Installation
+
+```bash
+pip install -e .
+```
 
 ## Quick Start
 
-### Using CLI (Recommended)
-
 ```bash
-# Ask a governance question
+# Check configuration and connectivity
+geister status --check
 
-# Use specific persona for strategic advice
-./pod_manager.py main ask -q "Should we approve this treasury proposal?" -p advisor
-
-# Ask complex questions from file with realm context
-./pod_manager.py main ask -qf complex_proposal.txt -p facilitator --realm-status-file realm_data.json
+# Ask a question
+geister ask "What proposals need attention?"
 
 # List available personas
-./pod_manager.py main personas
-
-# Check API health
-./pod_manager.py main health
-
-# Deploy new pod with cheapest available GPU
-./pod_manager.py main deploy
-
-# Start existing pod (deploy new if needed)
-./pod_manager.py main start --deploy-new-if-needed --verbose
-# Check pod status
-./pod_manager.py main status
+geister personas
 ```
 
-### Pod Operations
+## Architecture
 
-```bash
-# Stop pod
-./pod_manager.py main stop
+Geister uses a **client/server architecture**:
 
-# Restart pod
-./pod_manager.py main restart
+| Command | Runs Where | What it does |
+|---------|------------|--------------|
+| `geister ask` | Client → API | Sends question to server, which uses Ollama |
+| `geister status` | Client only | Checks env vars and pings endpoints |
+| `geister personas` | Client only | Lists local persona definitions |
+| `geister swarm` | Client → API | Runs agent swarm, agents call API |
+| `geister agent` | Client → API | Runs single agent, calls API |
+| `geister pod` | Client → RunPod | Manages RunPod instances |
+| `geister server start` | Server | Starts the Flask API locally |
+| `geister server status` | Client only | Checks if local server is running |
 
-# Terminate pod (delete)
-./pod_manager.py main terminate
+```
+Your machine (CLI) → GEISTER_API_URL (server) → GEISTER_OLLAMA_URL (LLM)
 ```
 
-## API Commands
+## Client Commands
 
 ### Ask Questions
 
 ```bash
 # Simple question
-./pod_manager.py main ask -q "What is quadratic voting?"
-
-# Question from file (for long/complex questions)
-./pod_manager.py main ask -qf governance_proposal.txt
+geister ask "What is quadratic voting?"
 
 # With specific persona
-./pod_manager.py main ask -q "Analyze this budget proposal" -p advisor
+geister ask "Analyze this budget proposal" --persona advisor
 
-# With realm context data
-./pod_manager.py main ask -q "Should we proceed?" --realm-status-file current_state.json
+# With realm context
+geister ask "Should we proceed?" --realm <realm_principal>
 ```
 
-### Persona Management
+### Agent Commands
 
 ```bash
-# List all available personas
-./pod_manager.py main personas
+# Run citizen agent
+geister agent citizen --name "Alice"
 
-# Get details for specific persona
-./pod_manager.py main persona -p ashoka
+# Run persona agent
+geister agent persona --persona exploiter
 
-# Available personas: ashoka (default), advisor, facilitator
+# Run voter agent
+geister agent voter --proposal <proposal_id>
 ```
 
-### Realm Status
+### Swarm Commands
 
 ```bash
-# Get status for all tracked realms
-./pod_manager.py main realm-status
+# Generate agent identities
+geister swarm generate 10
 
-# Get status for specific realm
-./pod_manager.py main realm-status -r realm_principal_id
+# Run agent swarm
+geister swarm run --persona compliant
+
+# List agents
+geister swarm list
+
+# Cleanup agents
+geister swarm cleanup
 ```
 
-### Health Check
+### Pod Management (RunPod)
 
 ```bash
-# Check API health and connectivity
-./pod_manager.py main health
+# Start pod
+geister pod start main
+
+# Check status
+geister pod status main
+
+# Stop pod
+geister pod stop main
+
+# Deploy new pod
+geister pod deploy main
 ```
 
-## Architecture Overview
+## Server Commands
 
-- **Pod Manager**: RunPod cloud deployment and management
-- **API Service**: Flask HTTP API with CORS support
-- **Persona System**: Multiple specialized AI governance advisors
-- **Database**: PostgreSQL for conversation history and realm status
-- **LLM Integration**: Ollama for local LLM inference
-- **RAG System**: ChromaDB for document embeddings and retrieval
+```bash
+# Start local API server (requires PostgreSQL)
+geister server start
+
+# Check if local server is running
+geister server status
+```
+
+### Local Development Setup
+
+```bash
+# Start PostgreSQL via Docker
+docker run -d --name geister-db \
+  -e POSTGRES_DB=geister_db \
+  -e POSTGRES_USER=geister_user \
+  -e POSTGRES_PASSWORD=geister_pass \
+  -p 5432:5432 postgres:15-alpine
+
+# Initialize schema
+PGPASSWORD=geister_pass psql -h localhost -U geister_user -d geister_db -f database/schema.sql
+
+# Start server
+DB_PASS=geister_pass geister server start
+```
 
 ## Configuration
 
-Set environment variables:
+### Client Mode (connect to remote API)
 
 ```bash
-export RUNPOD_API_KEY="your_runpod_api_key"
-export ASHOKA_DEFAULT_MODEL="llama3.2:1b"
+export GEISTER_API_URL=https://geister-api.realmsgos.dev
+export GEISTER_OLLAMA_URL=https://geister-ollama.realmsgos.dev
+export GEISTER_NETWORK=staging
+export GEISTER_MODEL=gpt-oss:20b
+export RUNPOD_API_KEY=your_key
 ```
+
+### Server Mode (run local server)
+
+```bash
+export DB_HOST=localhost
+export DB_NAME=geister_db
+export DB_USER=geister_user
+export DB_PASS=your_password
+export DB_PORT=5432
+```
+
+Use `geister status` to see current configuration.
 
 ## File Structure
 
-- `pod_manager.py` - Main CLI tool for pod management and API interaction
+- `geister_cli.py` - Main CLI entry point
 - `api.py` - HTTP API service
 - `persona_manager.py` - Multi-persona system
+- `agent_swarm.py` - Agent swarm management
+- `citizen_agent.py` - Citizen agent implementation
+- `persona_agent.py` - Persona agent implementation
+- `voter_agent.py` - Voter agent implementation
+- `pod_manager.py` - RunPod instance management
 - `database/` - Database client and schema
 - `prompts/personas/` - AI persona definitions
-- `tests/` - Test cases and scenarios
+- `cloudflared/` - Cloudflare tunnel configuration
