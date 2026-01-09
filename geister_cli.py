@@ -372,13 +372,27 @@ def ask_question(
     
     # Handle agent memory if agent_id is provided
     memory = None
+    display_name = agent_name
     if agent_id:
         try:
             from agent_memory import AgentMemory
             memory = AgentMemory(agent_id, persona=persona)
+            
+            # Load existing profile if available
+            profile = memory.get_profile()
+            if profile:
+                # Use stored values unless overridden by CLI flags
+                if not agent_name:
+                    display_name = profile.get('display_name') or agent_id
+                if not persona:
+                    persona = profile.get('persona')
+            
+            # Update profile if new values provided
             if agent_name:
                 memory.ensure_profile(display_name=agent_name)
-            console.print(f"[dim]🤖 Agent: {agent_name or agent_id} ({persona or 'default'})[/dim]")
+                display_name = agent_name
+            
+            console.print(f"[dim]🤖 Agent: {display_name or agent_id} ({persona or 'default'})[/dim]")
         except Exception as e:
             console.print(f"[yellow]⚠️  Could not load agent memory: {e}[/yellow]")
             console.print("[dim]Continuing without memory persistence...[/dim]")
@@ -396,6 +410,7 @@ def ask_question(
                 "user_principal": agent_id or "",
                 "realm_principal": realm_principal or "",
                 "persona": persona or "",
+                "agent_name": display_name or "",
                 "ollama_url": resolved_ollama_url,
                 "stream": True
             }

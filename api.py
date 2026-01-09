@@ -231,10 +231,15 @@ def build_user_context(user_principal, realm_principal):
         log(f"Error building user context: {e}")
         return f"\n=== USER CONTEXT ===\nUser: {user_principal[:8]}...\nError loading user history\n\n"
 
-def build_prompt(user_principal, realm_principal, question, realm_status=None, persona_name=None):
+def build_prompt(user_principal, realm_principal, question, realm_status=None, persona_name=None, agent_name=None):
     """Build complete prompt with persona + structured context + history + question"""
     # Get persona content using PersonaManager
     actual_persona_name, persona_content = persona_manager.get_persona_or_default(persona_name)
+    
+    # If agent_name is provided, add identity instruction to persona
+    if agent_name:
+        persona_content = f"Your name is {agent_name}. When asked about your name or identity, respond as {agent_name}.\n\n{persona_content}"
+    
     # Build structured realm context
     realm_context = build_structured_realm_context(realm_status)
     
@@ -363,6 +368,7 @@ def ask():
     question = data.get('question')
     realm_status = data.get('realm_status')  # Optional realm context
     persona_name = data.get('persona')  # Optional persona name
+    agent_name = data.get('agent_name')  # Optional agent display name
     ollama_url = data.get('ollama_url', 'http://localhost:11434')
     
     # Validate required fields - user_principal can be empty for anonymous users
@@ -400,7 +406,7 @@ def ask():
             realm_status = None
     
     # Build complete prompt with persona and realm context
-    prompt = build_prompt(user_principal, realm_principal, question, realm_status, persona_name)
+    prompt = build_prompt(user_principal, realm_principal, question, realm_status, persona_name, agent_name)
     
     # Log the complete prompt for debugging
     log("\n" + "="*80)
