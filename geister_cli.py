@@ -383,6 +383,8 @@ def ask_question(
     realm_principal: Optional[str] = typer.Option(None, "--realm", "-r", help="Realm principal ID"),
     ollama_url: Optional[str] = typer.Option(None, "--ollama-url", help="Ollama URL (or set OLLAMA_HOST)"),
     stream: bool = typer.Option(True, "--stream/--no-stream", help="Stream response in real-time"),
+    agent_id: Optional[str] = typer.Option(None, "--agent-id", "-a", help="Agent ID for memory persistence (requires local PostgreSQL)"),
+    agent_name: Optional[str] = typer.Option(None, "--agent-name", "-n", help="Display name for the agent"),
 ):
     """Ask Geister a question."""
     import requests
@@ -395,7 +397,22 @@ def ask_question(
     
     resolved_ollama_url = ollama_url or os.getenv("OLLAMA_HOST", "http://localhost:11434")
     
+    # Handle agent memory if agent_id is provided
+    memory = None
+    if agent_id:
+        try:
+            from agent_memory import AgentMemory
+            memory = AgentMemory(agent_id, persona=persona)
+            if agent_name:
+                memory.ensure_profile(display_name=agent_name)
+            console.print(f"[dim]🤖 Agent: {agent_name or agent_id} ({persona or 'default'})[/dim]")
+        except Exception as e:
+            console.print(f"[yellow]⚠️  Could not load agent memory: {e}[/yellow]")
+            console.print("[dim]Continuing without memory persistence...[/dim]")
+    
     console.print(f"[dim]Asking Geister: {question}[/dim]\n")
+    
+    full_response = ""
     
     if stream:
         # Use streaming endpoint for real-time feedback
@@ -403,7 +420,7 @@ def ask_question(
             url = f"{resolved_api_url}/api/ask"
             payload = {
                 "question": question,
-                "user_principal": "",
+                "user_principal": agent_id or "",
                 "realm_principal": realm_principal or "",
                 "persona": persona or "",
                 "ollama_url": resolved_ollama_url,
@@ -417,6 +434,7 @@ def ask_question(
                 for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
                     if chunk:
                         print(chunk, end="", flush=True)
+                        full_response += chunk
             
             print()  # Final newline
             
@@ -438,9 +456,23 @@ def ask_question(
             )
         
         if "answer" in result:
-            console.print(f"[bold green]Geister:[/bold green] {result['answer']}")
+            full_response = result['answer']
+            console.print(f"[bold green]Geister:[/bold green] {full_response}")
         else:
             console.print(f"[yellow]Response:[/yellow] {result}")
+    
+    # Save to agent memory if enabled
+    if memory and full_response:
+        try:
+            memory.record_action(
+                action_type="conversation",
+                action_summary=f"Asked: {question[:100]}...",
+                action_details={"question": question, "answer": full_response},
+                realm_principal=realm_principal
+            )
+            console.print("[dim]💾 Saved to agent memory[/dim]")
+        except Exception as e:
+            console.print(f"[yellow]⚠️  Could not save to memory: {e}[/yellow]")
 
 
 # =============================================================================
