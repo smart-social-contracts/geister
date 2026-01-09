@@ -15,11 +15,11 @@ class DatabaseClient:
     def connect(self):
         try:
             self.connection = psycopg2.connect(
-                host='localhost',
-                database='ashoka_db',
-                user='ashoka_user',
-                password='ashoka_pass',
-                port='5432'
+                host=os.getenv('DB_HOST', 'localhost'),
+                database=os.getenv('DB_NAME', 'geister_db'),
+                user=os.getenv('DB_USER', 'geister_user'),
+                password=os.getenv('DB_PASS', ''),
+                port=os.getenv('DB_PORT', '5432')
             )
             logger.info("Connected to PostgreSQL database")
         except Exception as e:
