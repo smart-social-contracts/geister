@@ -18,7 +18,7 @@ class DatabaseClient:
                 host=os.getenv('DB_HOST', 'localhost'),
                 database=os.getenv('DB_NAME', 'geister_db'),
                 user=os.getenv('DB_USER', 'geister_user'),
-                password=os.getenv('DB_PASS', ''),
+                password=os.getenv('DB_PASS', 'geister_pass'),
                 port=os.getenv('DB_PORT', '5432')
             )
             logger.info("Connected to PostgreSQL database")

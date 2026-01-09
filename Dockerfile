@@ -54,8 +54,8 @@ ENV OLLAMA_HOME=/workspace/ollama
 # --- PostgreSQL setup ---
 USER postgres
 RUN /etc/init.d/postgresql start && \
-    psql --command "CREATE USER ashoka_user WITH SUPERUSER PASSWORD 'ashoka_pass';" && \
-    createdb -O ashoka_user ashoka_db
+    psql --command "CREATE USER geister_user WITH SUPERUSER PASSWORD 'geister_pass';" && \
+    createdb -O geister_user geister_db
 USER root
 
 # --- Configure PostgreSQL for external connections ---
