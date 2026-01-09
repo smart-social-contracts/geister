@@ -36,9 +36,6 @@ CLIENT_ENV_VARS = {
     "GEISTER_OLLAMA_URL": ("Ollama URL", "https://geister-ollama.realmsgos.dev"),
     "GEISTER_NETWORK": ("Default network", "staging"),
     "GEISTER_MODEL": ("Default LLM model", "gpt-oss:20b"),
-    "CITIZEN_AGENT_MODEL": ("Model for citizen agent", "gpt-oss:20b"),
-    "PERSONA_AGENT_MODEL": ("Model for persona agent", "gpt-oss:20b"),
-    "VOTER_AGENT_MODEL": ("Model for voter agent", "gpt-oss:20b"),
     "RUNPOD_API_KEY": ("RunPod API key", None),
 }
 
