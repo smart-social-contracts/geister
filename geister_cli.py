@@ -33,8 +33,7 @@ from rich.console import Console
 # Environment variables configuration
 ENV_VARS = {
     "GEISTER_API_URL": ("Geister API URL", "https://geister-api.realmsgos.dev"),
-    "GEISTER_OLLAMA_URL": ("Ollama URL (via tunnel)", "https://geister-ollama.realmsgos.dev"),
-    "OLLAMA_HOST": ("Ollama server URL (direct)", "http://localhost:11434"),
+    "GEISTER_OLLAMA_URL": ("Ollama URL", "https://geister-ollama.realmsgos.dev"),
     "GEISTER_NETWORK": ("Default network", "staging"),
     "GEISTER_MODEL": ("Default LLM model", "gpt-oss:20b"),
     "CITIZEN_AGENT_MODEL": ("Model for citizen agent", "gpt-oss:20b"),
