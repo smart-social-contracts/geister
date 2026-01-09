@@ -5,8 +5,3 @@ isort>=5.0.0
 mypy>=1.0.0
 flake8>=6.0.0
 bumpversion>=0.5.3
-flask
-flask_cors
-requests
-urllib3
-runpod
