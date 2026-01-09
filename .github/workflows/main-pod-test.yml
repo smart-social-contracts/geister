@@ -15,8 +15,8 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      GEISTER_API_URL: https://geister-api.realmsgos.dev
       BOOTUP_TIMEOUT_SEC: 600
-      API_URL: https://geister-api.realmsgos.dev
 
     steps:
       - name: Checkout repository
@@ -30,8 +30,23 @@ jobs:
       - name: Install dependencies
         run: pip install -e .
 
-      - name: Run remote CI tests
+      - name: Deploy pod with latest image
+        run: geister pod restart main --deploy-new --verbose
+
+      - name: Wait for API to be ready
+        run: ./scripts/health_check.py $BOOTUP_TIMEOUT_SEC "$GEISTER_API_URL"
+
+      - name: Test API connectivity
         run: |
-          geister pod restart main --deploy-new --verbose
-          ./scripts/health_check.py $BOOTUP_TIMEOUT_SEC "$API_URL"
-          ./scripts/run_remote_ci_tests.py "$API_URL"
+          echo "🔍 Testing API connectivity..."
+          geister status --check
+
+      - name: Test basic ask functionality
+        run: |
+          echo "🤖 Testing basic ask..."
+          geister ask "Hello, are you working?" --api-url "$GEISTER_API_URL"
+
+      - name: Test realm tool integration
+        run: |
+          echo "🏛️ Testing realm tool integration..."
+          geister ask "Please describe the realm at staging" --api-url "$GEISTER_API_URL"

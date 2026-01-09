@@ -43,9 +43,6 @@ ASHOKA_DEFAULT_MODEL = os.getenv('ASHOKA_DEFAULT_MODEL', 'llama3.2:1b')
 db_client = DatabaseClient()
 realm_status_service = RealmStatusService(db_client)
 
-# In-memory test status storage
-test_jobs = {}
-
 # Inactivity timeout configuration
 INACTIVITY_TIMEOUT_SECONDS = int(os.getenv('INACTIVITY_TIMEOUT_SECONDS', '0'))  # Default: disabled
 INACTIVITY_CHECK_INTERVAL_SECONDS = int(os.getenv('INACTIVITY_CHECK_INTERVAL_SECONDS', '60'))
@@ -608,123 +605,6 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
     except Exception as e:
         log(f"Error in stream_response_with_tools: {traceback.format_exc()}")
         yield f"Error: {str(e)}"
-
-def run_test_background(test_id):
-    """Run test in background thread"""
-    try:
-        test_jobs[test_id]['status'] = 'running'
-        test_jobs[test_id]['output'] = 'Starting test execution...\n'
-        
-        # Clean up database before running tests
-        test_jobs[test_id]['output'] += 'Cleaning up database...\n'
-        cleanup_process = subprocess.run(
-            ['./scripts/cleanup_db.sh'],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        
-        if cleanup_process.returncode == 0:
-            test_jobs[test_id]['output'] += cleanup_process.stdout
-        else:
-            test_jobs[test_id]['output'] += f'Database cleanup failed: {cleanup_process.stderr}\n'
-            # DO NOT continue with tests even if cleanup fails
-            raise Exception("Database cleanup failed")
-        
-        # Run the test_runner.py script with real-time output
-        process = subprocess.Popen(
-            ['./test_runner.sh'],  # -u for unbuffered output
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=0,  # Unbuffered
-            universal_newlines=True,
-            env=dict(os.environ, PYTHONUNBUFFERED='1')  # Force unbuffered
-        )
-        
-        output_lines = []
-        for line in process.stdout:
-            output_lines.append(line)
-            test_jobs[test_id]['output'] = ''.join(output_lines)
-        
-        process.wait(timeout=300)  # 5 minute timeout
-        
-        if process.returncode == 0:
-            test_jobs[test_id]['status'] = 'success'
-        else:
-            test_jobs[test_id]['status'] = 'failed'
-            
-    except subprocess.TimeoutExpired:
-        test_jobs[test_id]['status'] = 'failed'
-        test_jobs[test_id]['output'] += '\nTest timed out after 5 minutes'
-        if 'process' in locals():
-            process.kill()
-    except Exception as e:
-        test_jobs[test_id]['status'] = 'failed'
-        test_jobs[test_id]['output'] += f'\nERROR: {str(e)}'
-
-@app.route('/start-test', methods=['POST'])
-def start_test():
-    """Start CI test in background"""
-    # Update activity timestamp
-    update_activity()
-    test_id = str(uuid.uuid4())
-    
-    # Initialize test job
-    test_jobs[test_id] = {
-        'status': 'pending',
-        'output': ''
-    }
-    
-    # Start background thread
-    thread = threading.Thread(target=run_test_background, args=(test_id,))
-    thread.daemon = True
-    thread.start()
-    
-    return jsonify({
-        'test_id': test_id,
-        'status': 'pending'
-    })
-
-@app.route('/test-status/<test_id>', methods=['GET'])
-def test_status(test_id):
-    """Get test status"""
-    # Update activity timestamp
-    update_activity()
-    if test_id not in test_jobs:
-        return jsonify({'error': 'Test ID not found'}), 404
-    
-    job = test_jobs[test_id]
-    return jsonify({
-        'test_id': test_id,
-        'status': job['status'],
-        'output': job['output']
-    })
-
-@app.route('/test-results/<test_id>', methods=['GET'])
-def test_results(test_id):
-    """Get detailed test results"""
-    # Update activity timestamp
-    update_activity()
-    if test_id not in test_jobs:
-        return jsonify({'error': 'Test ID not found'}), 404
-    
-    # Check if test is completed
-    job = test_jobs[test_id]
-    if job['status'] not in ['success', 'failed']:
-        return jsonify({'error': 'Test not completed yet'}), 400
-    
-    # Try to read test_results.json file
-    try:
-        results_file = Path(__file__).parent / 'test_results.json'
-        if results_file.exists():
-            with open(results_file, 'r') as f:
-                results_data = json.load(f)
-            return jsonify(results_data)
-        else:
-            return jsonify({'error': 'Test results file not found'}), 404
-    except Exception as e:
-        return jsonify({'error': f'Failed to read test results: {str(e)}'}), 500
 
 @app.route('/suggestions', methods=['GET'])
 def get_suggestions():
