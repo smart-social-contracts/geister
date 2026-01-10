@@ -26,25 +26,6 @@ def log(message):
     print(message, flush=True)
 
 
-def get_realm_principal_from_folder(realm_folder: str, network: str = "staging") -> str:
-    """Extract realm_principal from canister_ids.json in realm_folder."""
-    try:
-        canister_ids_path = Path(realm_folder) / "canister_ids.json"
-        if canister_ids_path.exists():
-            with open(canister_ids_path) as f:
-                canister_ids = json.load(f)
-                # Look for realm_backend canister ID for the network
-                if "realm_backend" in canister_ids:
-                    realm_backend = canister_ids["realm_backend"]
-                    if network in realm_backend:
-                        return realm_backend[network]
-                    # Try 'ic' as fallback
-                    if "ic" in realm_backend:
-                        return realm_backend["ic"]
-    except Exception as e:
-        log(f"Could not get realm_principal from {realm_folder}: {e}")
-    return ""
-
 app = Flask(__name__)
 # Enable CORS with explicit configuration to allow cross-origin requests from any origin
 CORS(app, 
@@ -422,35 +403,8 @@ def ask():
     # Get actual persona name used (with fallback)
     actual_persona_name, _ = persona_manager.get_persona_or_default(persona_name)
     
-    # If realm_principal is provided but no realm_status, try to fetch from database
-    log(f"Fetching realm status for {realm_principal}")
-    log(f"Realm status: {realm_status}")
-    if realm_principal and not realm_status:
-        try:
-            realm_status = realm_status_service.get_realm_status_summary(realm_principal)
-            if realm_status:
-                log(f"Retrieved realm status from database for {realm_principal}")
-            else:
-                log(f"No realm status found in database for {realm_principal}")
-                # Fetch and store fresh data from the realm canister
-                log(f"Fetching and storing fresh realm status from canister {realm_principal}")
-                success = realm_status_service.fetch_and_store_realm_status(realm_principal)
-                if success:
-                    log(f"Successfully fetched and stored realm status")
-                    # Now try to get it from the database again
-                    realm_status = realm_status_service.get_realm_status_summary(realm_principal)
-                    if realm_status:
-                        log(f"Retrieved freshly stored realm status from database")
-                    else:
-                        log(f"Warning: Failed to retrieve freshly stored realm status")
-                else:
-                    log(f"Failed to fetch realm status from canister {realm_principal}")
-        except Exception as e:
-            log(f"Error retrieving realm status from database: {e}")
-            realm_status = None
-    
-    # Build complete prompt with persona and realm context
-    prompt = build_prompt(user_principal, realm_principal, question, realm_status, persona_name, agent_name, agent_background)
+    # Build complete prompt with persona and realm context (realm_status fetched by LLM tool if needed)
+    prompt = build_prompt(user_principal, realm_principal, question, None, persona_name, agent_name, agent_background)
     
     # Log the complete prompt for debugging
     log("\n" + "="*80)
@@ -509,20 +463,6 @@ def ask():
                     tool_result = execute_tool(tool_name, tool_args, network=network, realm_folder=realm_folder)
                     
                     log(f"Tool result: {tool_result[:500]}..." if len(tool_result) > 500 else f"Tool result: {tool_result}")
-                    
-                    # Store realm_status result to database if tool was realm_status
-                    if tool_name == "realm_status" and tool_result:
-                        try:
-                            # Get realm_principal from canister_ids.json if not provided
-                            effective_realm_principal = realm_principal or get_realm_principal_from_folder(realm_folder, network)
-                            if effective_realm_principal:
-                                result_data = json.loads(tool_result)
-                                if "error" not in result_data:
-                                    realm_url = f"https://{effective_realm_principal}.ic0.app"
-                                    db_client.store_realm_status(effective_realm_principal, realm_url, result_data)
-                                    log(f"Stored realm_status to database for {effective_realm_principal}")
-                        except Exception as e:
-                            log(f"Failed to store realm_status: {e}")
                     
                     # Add tool result to messages
                     messages.append({
@@ -610,20 +550,6 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
                 tool_result = execute_tool(tool_name, tool_args, network=network, realm_folder=realm_folder)
                 
                 log(f"Tool result: {tool_result[:500]}..." if len(tool_result) > 500 else f"Tool result: {tool_result}")
-                
-                # Store realm_status result to database if tool was realm_status
-                if tool_name == "realm_status" and tool_result:
-                    try:
-                        # Get realm_principal from canister_ids.json if not provided
-                        effective_realm_principal = realm_principal or get_realm_principal_from_folder(realm_folder, network)
-                        if effective_realm_principal:
-                            result_data = json.loads(tool_result)
-                            if "error" not in result_data:
-                                realm_url = f"https://{effective_realm_principal}.ic0.app"
-                                db_client.store_realm_status(effective_realm_principal, realm_url, result_data)
-                                log(f"Stored realm_status to database for {effective_realm_principal}")
-                    except Exception as e:
-                        log(f"Failed to store realm_status: {e}")
                 
                 # Add tool result to messages
                 messages.append({
