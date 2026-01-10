@@ -855,12 +855,8 @@ if __name__ == '__main__':
     # Start inactivity monitoring if enabled
     start_inactivity_monitor()
     
-    # Start realm status scheduler if enabled
-    start_scheduler()
-    
     try:
         app.run(host='0.0.0.0', port=5000, threaded=True)
     finally:
         # Ensure cleanup on exit
         stop_inactivity_monitor()
-        stop_scheduler()
