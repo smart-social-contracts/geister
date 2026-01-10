@@ -721,23 +721,34 @@ Format your response as exactly 3 questions, one per line, with no numbering or 
             "persona_used": persona_manager.default_persona
         })
 
-def get_git_commit():
-    """Get current git commit hash."""
+VERSION = "0.1.0"
+
+def get_git_info():
+    """Get current git commit hash and datetime."""
     try:
         import subprocess
-        result = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=5)
-        return result.stdout.strip() if result.returncode == 0 else None
+        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=5)
+        commit_hash = commit.stdout.strip() if commit.returncode == 0 else None
+        
+        datetime_result = subprocess.run(["git", "log", "-1", "--format=%ci"], capture_output=True, text=True, timeout=5)
+        commit_datetime = datetime_result.stdout.strip() if datetime_result.returncode == 0 else None
+        
+        return commit_hash, commit_datetime
     except:
-        return None
+        return None, None
 
 @app.route('/', methods=['GET'])
 def health():
     # Update activity timestamp
     update_activity()
     
+    commit_hash, commit_datetime = get_git_info()
+    
     return jsonify({
         "status": "ok",
-        "git_commit": get_git_commit(),
+        "version": VERSION,
+        "git_commit": commit_hash,
+        "git_commit_datetime": commit_datetime,
         "inactivity_timeout_seconds": INACTIVITY_TIMEOUT_SECONDS,
         "seconds_since_last_activity": int(time.time() - last_activity_time) if INACTIVITY_TIMEOUT_SECONDS > 0 else None
     })

@@ -722,14 +722,22 @@ def status(
         color = "green" if ok else "red"
         console.print(f"  Geister API ({api_url}): [{color}]{msg}[/{color}]")
         
-        # Show server git commit
+        # Show server version info
         try:
             response = requests.get(api_url.rstrip('/'), timeout=5)
             if response.status_code == 200:
                 data = response.json()
+                version = data.get('version')
                 git_commit = data.get('git_commit')
-                if git_commit:
-                    console.print(f"  Server git commit: [cyan]{git_commit}[/cyan]")
+                git_datetime = data.get('git_commit_datetime')
+                if version or git_commit:
+                    console.print(f"\n[bold]Server Version:[/bold]")
+                    if version:
+                        console.print(f"  Version: [cyan]{version}[/cyan]")
+                    if git_commit:
+                        console.print(f"  Commit: [cyan]{git_commit}[/cyan]")
+                    if git_datetime:
+                        console.print(f"  Date: [cyan]{git_datetime}[/cyan]")
         except:
             pass
         
