@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "geister"
-version = "0.1.0"
+version = "0.1.1"
 description = "AI Governance Agents for Realms - CLI for managing and running citizen agents"
 readme = "README.md"
 license = {text = "MIT"}
