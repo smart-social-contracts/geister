@@ -757,10 +757,8 @@ def mode_cmd(
     console.print(f"[dim]API URL: {api_url}[/dim]")
     
     if mode == "local":
-        console.print("\n[dim]Make sure to:[/dim]")
-        console.print("[dim]  1. Start PostgreSQL (docker or local)[/dim]")
-        console.print("[dim]  2. Run: geister server start[/dim]")
-        console.print("[dim]  3. Configure OLLAMA_HOST if using local Ollama[/dim]")
+        console.print("\n[dim]Quick start: ./local.sh start[/dim]")
+        console.print("[dim]Or manually: DB_PASS=geister_pass geister server start[/dim]")
 
 
 # =============================================================================
