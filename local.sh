@@ -4,6 +4,10 @@
 
 set -e
 
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 DB_CONTAINER="geister-db"
 DB_USER="geister_user"
 DB_PASS="geister_pass"
@@ -58,7 +62,7 @@ start_local() {
     echo "   Press Ctrl+C to stop"
     echo ""
     export DB_PASS=$DB_PASS
-    geister server start
+    python api.py
 }
 
 stop_local() {
