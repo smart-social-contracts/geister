@@ -77,9 +77,49 @@ app.add_typer(server_app, name="server")
 # Configuration
 # =============================================================================
 
+CONFIG_DIR = os.path.expanduser("~/.geister")
+CONFIG_FILE = os.path.join(CONFIG_DIR, "mode")
+
 DEFAULT_NETWORK = os.getenv("GEISTER_NETWORK", "staging")
 DEFAULT_MODEL = os.getenv("GEISTER_MODEL", "gpt-oss:20b")
 DEFAULT_REALM_FOLDER = "."
+
+# Mode configurations (only affects API URL, not Ollama)
+MODES = {
+    "remote": {
+        "GEISTER_API_URL": "https://geister-api.realmsgos.dev",
+    },
+    "local": {
+        "GEISTER_API_URL": "http://localhost:5000",
+    },
+}
+
+
+def get_current_mode() -> str:
+    """Get current mode from config file."""
+    try:
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, 'r') as f:
+                return f.read().strip()
+    except:
+        pass
+    return "remote"
+
+
+def set_mode(mode: str):
+    """Save mode to config file."""
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(CONFIG_FILE, 'w') as f:
+        f.write(mode)
+
+
+def get_api_url() -> str:
+    """Get API URL based on current mode (env var takes precedence)."""
+    env_url = os.getenv("GEISTER_API_URL")
+    if env_url:
+        return env_url
+    mode = get_current_mode()
+    return MODES.get(mode, MODES["remote"])["GEISTER_API_URL"]
 
 
 def get_current_user_principal() -> str:
@@ -220,8 +260,8 @@ def agent_ask(
     # Resolve agent reference to full ID
     agent_id = resolve_agent_id(agent_ref)
     
-    # Resolve URLs
-    resolved_api_url = api_url or os.getenv("GEISTER_API_URL", "https://geister-api.realmsgos.dev")
+    # Resolve URLs (uses mode config if env var not set)
+    resolved_api_url = api_url or get_api_url()
     if not resolved_api_url.startswith("http"):
         resolved_api_url = f"https://{resolved_api_url}"
     resolved_ollama_url = ollama_url or os.getenv("OLLAMA_HOST", "http://localhost:11434")
@@ -647,11 +687,15 @@ def status(
     console.print()
     console.print(_make_env_table("Server Mode", SERVER_ENV_VARS))
     
+    # Show current mode
+    current_mode = get_current_mode()
+    console.print(f"[bold]Mode:[/bold] {current_mode}")
+    
     if check:
         console.print()
         console.print("[bold]Connection Status:[/bold]")
         
-        api_url = os.getenv("GEISTER_API_URL", "https://geister-api.realmsgos.dev")
+        api_url = get_api_url()
         ok, msg = _check_api_connection(api_url)
         color = "green" if ok else "red"
         console.print(f"  Geister API ({api_url}): [{color}]{msg}[/{color}]")
@@ -675,6 +719,48 @@ def status(
         console.print("[dim]Tip: Use --check to verify connectivity to API and Ollama[/dim]")
     
     console.print()
+
+
+# =============================================================================
+# Mode Command
+# =============================================================================
+
+@app.command("mode")
+def mode_cmd(
+    mode: Optional[str] = typer.Argument(None, help="Mode to set: 'local' or 'remote'"),
+):
+    """Switch between local and remote mode.
+    
+    Local mode: API at http://localhost:5000
+    Remote mode: API at https://geister-api.realmsgos.dev (default)
+    
+    Note: This only affects GEISTER_API_URL. Configure OLLAMA_HOST separately.
+    """
+    if mode is None:
+        # Show current mode
+        current = get_current_mode()
+        api_url = get_api_url()
+        console.print(f"\n[bold]Current mode:[/bold] {current}")
+        console.print(f"[dim]API URL: {api_url}[/dim]\n")
+        console.print("[dim]Usage: geister mode local|remote[/dim]")
+        return
+    
+    mode = mode.lower()
+    if mode not in MODES:
+        console.print(f"[red]Invalid mode: {mode}[/red]")
+        console.print("Valid modes: local, remote")
+        raise typer.Exit(1)
+    
+    set_mode(mode)
+    api_url = MODES[mode]["GEISTER_API_URL"]
+    console.print(f"[green]✅ Switched to {mode} mode[/green]")
+    console.print(f"[dim]API URL: {api_url}[/dim]")
+    
+    if mode == "local":
+        console.print("\n[dim]Make sure to:[/dim]")
+        console.print("[dim]  1. Start PostgreSQL (docker or local)[/dim]")
+        console.print("[dim]  2. Run: geister server start[/dim]")
+        console.print("[dim]  3. Configure OLLAMA_HOST if using local Ollama[/dim]")
 
 
 # =============================================================================

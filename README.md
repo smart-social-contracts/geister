@@ -29,44 +29,46 @@ geister agent ask 1
 
 ## Modes
 
+```bash
+geister mode          # Show current mode
+geister mode remote   # Use hosted API (default)
+geister mode local    # Use local API
+```
+
 ### Remote Mode (default)
 
-Connects to hosted API and Ollama. No local setup required.
+Connects to hosted API. No local setup required.
 
 ```bash
-export GEISTER_API_URL=https://geister-api.realmsgos.dev
-export GEISTER_OLLAMA_URL=https://geister-ollama.realmsgos.dev
+geister mode remote
 ```
 
 ### Local Mode
 
-Run everything locally. Requires PostgreSQL and Ollama.
+Run API locally. Requires PostgreSQL.
 
 ```bash
-# 1. Start PostgreSQL
+# 1. Switch to local mode
+geister mode local
+
+# 2. Start PostgreSQL
 docker run -d --name geister-db \
   -e POSTGRES_DB=geister_db \
   -e POSTGRES_USER=geister_user \
   -e POSTGRES_PASSWORD=geister_pass \
   -p 5432:5432 postgres:15-alpine
 
-# 2. Initialize schema
+# 3. Initialize schema
 PGPASSWORD=geister_pass psql -h localhost -U geister_user -d geister_db -f database/schema.sql
 
-# 3. Start local Ollama
-ollama serve
+# 4. Start API server
+DB_PASS=geister_pass geister server start
 
-# 4. Configure environment
-export GEISTER_API_URL=http://localhost:5000
-export OLLAMA_HOST=http://localhost:11434
-export DB_PASS=geister_pass
-
-# 5. Start API server
-geister server start
-
-# 6. In another terminal, use the CLI
+# 5. In another terminal, use the CLI
 geister agent ask 1 "Hello"
 ```
+
+**Note:** Ollama URL is configured separately via `OLLAMA_HOST`. You can use the remote Ollama or run locally with `ollama serve`.
 
 ## Commands
 
