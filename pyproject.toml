@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geister"
+version = "0.1.0"
+description = "AI Governance Agents for Realms - CLI for managing and running citizen agents"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+keywords = ["ai", "agents", "governance", "realms", "llm", "citizen-agents"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "requests>=2.28.0",
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "pyyaml>=6.0",
+    "psycopg2-binary>=2.9.0",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.4", "black>=24.0"]
+server = ["flask>=2.0.0", "flask-cors>=4.0.0"]
+full = [
+    "ic-py",
+    "runpod>=1.6.0",
+    "realms-gos>=0.2.1",
+    "numpy>=1.24.0",
+]
+
+[project.scripts]
+geister = "geister_cli:main"
+
+[project.urls]
+Repository = "https://github.com/smart-social-contracts/geister"
+
+[tool.setuptools]
+py-modules = [
+    "geister_cli",
+    "agent_swarm",
+    "citizen_agent",
+    "persona_agent",
+    "voter_agent",
+    "pod_manager",
+    "realm_tools",
+    "citizen_personas",
+    "persona_manager",
+    "agent_memory",
+    "api",
+]
+
+[tool.setuptools.package-data]
+"*" = ["prompts/**/*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.black]
+line-length = 120
+target-version = ["py39"]
