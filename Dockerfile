@@ -40,7 +40,7 @@ RUN git config --global user.name "Docker User"
 RUN git config --global user.email "docker@container.local"
 RUN git config --global init.defaultBranch main
 # Trust the workspace directory for Git operations
-RUN git config --global --add safe.directory /app/ashoka
+RUN git config --global --add safe.directory /app/geister
 
 ARG DFX_VERSION=0.29.0
 RUN DFX_VERSION=${DFX_VERSION} DFXVM_INIT_YES=true sh -ci "$(curl -fsSL https://internetcomputer.org/install.sh)"
@@ -68,9 +68,9 @@ RUN mkdir -p /root/.cloudflared
 COPY cloudflared/config.yml /root/.cloudflared/config.yml
 
 # --- App environment ---
-WORKDIR /app/ashoka
+WORKDIR /app/geister
 
-# Copy all files from the ashoka folder
+# Copy all files from the geister folder
 COPY . .
 
 # Note: Python dependencies will be installed by run.sh into the persistent volume
