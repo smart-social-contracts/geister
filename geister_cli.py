@@ -2,25 +2,29 @@
 """
 Geister CLI - Unified command-line interface for AI governance agents.
 
-Client commands (connect to remote API):
-    geister ask "What proposals need attention?"
-    geister swarm run --persona compliant
-    geister agent citizen --name "Alice"
-    geister pod start main
-    geister status
+Agent commands:
+    geister agent ls                              # List all agents
+    geister agent generate 10                     # Generate 10 agent identities
+    geister agent ask agent_001 "Join the realm"  # Ask agent a question
+    geister agent ask agent_001                   # Start interactive session
+    geister agent inspect agent_001               # Show agent data
+    geister agent rm agent_001                    # Remove agent
+    geister agent rm --all                        # Remove all agents
 
-Server commands (require local PostgreSQL + Flask):
+Infrastructure commands:
+    geister pod start main
     geister server start
-    geister server status
+    geister status
+    geister personas
+    geister version
 
 Usage:
-    # Client mode - connect to remote Geister API
+    # Set environment
     export GEISTER_API_URL=https://geister-api.realmsgos.dev
     export OLLAMA_HOST=https://xxx.proxy.runpod.net
-    geister ask "hello"
     
-    # Server mode - run local API server
-    geister server start
+    # Talk to an agent
+    geister agent ask swarm_agent_001 "Please join the realm"
 """
 
 import os
@@ -59,12 +63,10 @@ app = typer.Typer(
 console = Console()
 
 # Sub-applications
-swarm_app = typer.Typer(help="Agent swarm management (client)")
-agent_app = typer.Typer(help="Run individual AI agents (client)")
-pod_app = typer.Typer(help="RunPod instance management (client)")
+agent_app = typer.Typer(help="Agent management and interaction")
+pod_app = typer.Typer(help="RunPod instance management")
 server_app = typer.Typer(help="Server commands (requires PostgreSQL)")
 
-app.add_typer(swarm_app, name="swarm")
 app.add_typer(agent_app, name="agent")
 app.add_typer(pod_app, name="pod")
 app.add_typer(server_app, name="server")
@@ -97,128 +99,269 @@ def get_current_user_principal() -> str:
 
 
 # =============================================================================
-# Swarm Commands
+# Agent Commands
 # =============================================================================
 
-@swarm_app.command("generate")
-def swarm_generate(
-    count: int = typer.Argument(..., help="Number of identities to generate"),
+@agent_app.command("ls")
+def agent_ls():
+    """List all agents with their profiles."""
+    try:
+        from agent_memory import list_all_agents
+        from agent_swarm import cmd_list
+        
+        # Show dfx identities
+        console.print("\n[bold]DFX Agent Identities:[/bold]")
+        cmd_list()
+        
+        # Show database profiles
+        agents = list_all_agents()
+        
+        if agents:
+            console.print("\n[bold]Agent Profiles (Database):[/bold]")
+            console.print("=" * 60)
+            for agent in agents:
+                name = agent.get('display_name') or agent['agent_id']
+                persona = agent.get('persona') or 'default'
+                sessions = agent.get('total_sessions', 0)
+                console.print(f"  🤖 [bold]{name}[/bold] ({agent['agent_id']})")
+                console.print(f"     Persona: {persona} | Sessions: {sessions}")
+            console.print()
+    except Exception as e:
+        console.print(f"[yellow]Could not list agents: {e}[/yellow]")
+
+
+@agent_app.command("generate")
+def agent_generate(
+    count: int = typer.Argument(..., help="Number of agent identities to generate"),
     start: int = typer.Option(1, "--start", "-s", help="Starting index"),
 ):
-    """Generate agent identities for the swarm."""
+    """Generate agent identities (dfx identities for the swarm)."""
     from agent_swarm import cmd_generate
     cmd_generate(count, start)
 
 
-@swarm_app.command("list")
-def swarm_list():
-    """List all agent identities."""
-    from agent_swarm import cmd_list
-    cmd_list()
-
-
-@swarm_app.command("run")
-def swarm_run(
-    start: int = typer.Option(1, "--start", "-s", help="Start index"),
-    end: Optional[int] = typer.Option(None, "--end", "-e", help="End index (default: all)"),
-    network: str = typer.Option(DEFAULT_NETWORK, "--network", "-n", help="Network to use"),
-    model: str = typer.Option(DEFAULT_MODEL, "--model", "-m", help="Ollama model to use"),
-    delay: float = typer.Option(1.0, "--delay", "-d", help="Delay between agents (seconds)"),
-    persona: Optional[str] = typer.Option(None, "--persona", "-p", help="Persona for all agents"),
-    distribution: bool = typer.Option(False, "--distribution", help="Use realistic persona distribution"),
+@agent_app.command("rm")
+def agent_rm(
+    agent_id: Optional[str] = typer.Argument(None, help="Agent ID to remove"),
+    all_agents: bool = typer.Option(False, "--all", "-a", help="Remove all agents"),
+    confirm: bool = typer.Option(False, "--confirm", "-y", help="Skip confirmation"),
 ):
-    """Run citizen agents from the swarm."""
-    from agent_swarm import cmd_run
-    cmd_run(start, end, network, model, delay, persona, distribution)
-
-
-@swarm_app.command("cleanup")
-def swarm_cleanup(
-    confirm: bool = typer.Option(False, "--confirm", help="Actually delete identities"),
-):
-    """Delete all agent identities."""
-    from agent_swarm import cmd_cleanup
-    cmd_cleanup(confirm)
-
-
-# =============================================================================
-# Agent Commands
-# =============================================================================
-
-@agent_app.command("list")
-def agent_list():
-    """List all agents with their profiles."""
-    try:
-        from agent_memory import list_all_agents
-        agents = list_all_agents()
-        
-        if not agents:
-            console.print("[dim]No agents with profiles yet.[/dim]")
-            console.print("[dim]Use 'geister ask --agent-id <id>' to create agent memories.[/dim]")
+    """Remove agent identity and data."""
+    if all_agents:
+        if not confirm:
+            console.print("[yellow]This will delete ALL agent identities.[/yellow]")
+            console.print("Run with --confirm to actually delete.")
             return
-        
-        console.print("\n[bold]Registered Agents:[/bold]")
-        console.print("=" * 60)
-        for agent in agents:
-            name = agent.get('display_name') or agent['agent_id']
-            persona = agent.get('persona') or 'default'
-            sessions = agent.get('total_sessions', 0)
-            console.print(f"  🤖 [bold]{name}[/bold] ({agent['agent_id']})")
-            console.print(f"     Persona: {persona} | Sessions: {sessions}")
-        console.print()
-    except Exception as e:
-        console.print(f"[yellow]Could not list agents: {e}[/yellow]")
-        console.print("[dim]Database may not be available.[/dim]")
+        from agent_swarm import cmd_cleanup
+        cmd_cleanup(confirm=True)
+    elif agent_id:
+        if not confirm:
+            console.print(f"[yellow]This will delete agent '{agent_id}'.[/yellow]")
+            console.print("Run with --confirm to actually delete.")
+            return
+        # Delete specific agent
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["dfx", "identity", "remove", agent_id],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                console.print(f"[green]✅ Removed agent identity: {agent_id}[/green]")
+            else:
+                console.print(f"[red]Failed to remove: {result.stderr}[/red]")
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+    else:
+        console.print("[red]Specify an agent_id or use --all[/red]")
+        raise typer.Exit(1)
 
 
-@agent_app.command("run")
-def agent_run(
+@agent_app.command("ask")
+def agent_ask(
     agent_id: str = typer.Argument(..., help="Agent ID (e.g., swarm_agent_001)"),
-    persona: str = typer.Option("compliant", "--persona", "-p", help="Persona type"),
-    name: Optional[str] = typer.Option(None, "--name", "-n", help="Display name for the agent"),
+    question: Optional[str] = typer.Argument(None, help="Question to ask (omit for interactive mode)"),
+    persona: Optional[str] = typer.Option(None, "--persona", "-p", help="Persona type"),
     realm: Optional[str] = typer.Option(None, "--realm", "-r", help="Realm principal ID"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="Display name for the agent"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", "-u", help="Geister API URL"),
+    ollama_url: Optional[str] = typer.Option(None, "--ollama-url", help="Ollama URL"),
 ):
-    """Start an interactive chat session with an agent."""
+    """Ask an agent a question or start interactive chat session."""
+    import requests
+    
+    # Resolve URLs
+    resolved_api_url = api_url or os.getenv("GEISTER_API_URL", "https://geister-api.realmsgos.dev")
+    if not resolved_api_url.startswith("http"):
+        resolved_api_url = f"https://{resolved_api_url}"
+    resolved_ollama_url = ollama_url or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    
+    # Load agent profile
+    memory = None
+    display_name = name
+    agent_background = None
     try:
         from agent_memory import AgentMemory
-        
         memory = AgentMemory(agent_id, persona=persona)
-        if name:
-            memory.ensure_profile(display_name=name)
         
-        display_name = name or agent_id
-        console.print(f"\n[bold green]🤖 Agent Session: {display_name}[/bold green]")
-        console.print(f"[dim]Persona: {persona} | Agent ID: {agent_id}[/dim]")
+        profile = memory.get_profile()
+        if profile:
+            if not name:
+                display_name = profile.get('display_name') or agent_id
+            if not persona:
+                persona = profile.get('persona')
+            agent_background = profile.get('metadata')
+        
+        if name or not profile:
+            profile = memory.ensure_profile(display_name=name)
+            if name:
+                display_name = name
+            if not agent_background:
+                agent_background = profile.get('metadata')
+    except Exception as e:
+        console.print(f"[yellow]⚠️  Could not load agent memory: {e}[/yellow]")
+    
+    def send_question(q: str) -> str:
+        """Send a question to the agent and return the response."""
+        user_principal = get_current_user_principal()
+        payload = {
+            "question": q,
+            "user_principal": user_principal,
+            "agent_id": agent_id,
+            "realm_principal": realm or "",
+            "persona": persona or "",
+            "agent_name": display_name or "",
+            "agent_background": agent_background,
+            "ollama_url": resolved_ollama_url,
+            "stream": True
+        }
+        
+        full_response = ""
+        try:
+            url = f"{resolved_api_url}/api/ask"
+            with requests.post(url, json=payload, stream=True, timeout=300) as response:
+                response.raise_for_status()
+                for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
+                    if chunk:
+                        print(chunk, end="", flush=True)
+                        full_response += chunk
+            print()
+        except requests.exceptions.RequestException as e:
+            console.print(f"[red]Error: {e}[/red]")
+        
+        return full_response
+    
+    # Interactive mode if no question provided
+    if question is None:
+        console.print(f"\n[bold green]🤖 Agent Session: {display_name or agent_id}[/bold green]")
+        console.print(f"[dim]Persona: {persona or 'default'} | Agent ID: {agent_id}[/dim]")
         console.print("[dim]Type 'exit' or Ctrl+C to end session[/dim]\n")
         
-        while True:
-            try:
-                user_input = input("You: ").strip()
-                if user_input.lower() in ('exit', 'quit', 'q'):
+        try:
+            while True:
+                try:
+                    user_input = input("You: ").strip()
+                    if user_input.lower() in ('exit', 'quit', 'q'):
+                        break
+                    if not user_input:
+                        continue
+                    
+                    console.print("[bold green]Agent:[/bold green] ", end="")
+                    response = send_question(user_input)
+                    
+                    # Save to memory
+                    if memory and response:
+                        try:
+                            memory.remember(
+                                action_type="conversation",
+                                action_summary=f"Asked: {user_input[:100]}...",
+                                action_details={"question": user_input, "answer": response},
+                                realm_principal=realm
+                            )
+                        except:
+                            pass
+                    print()
+                    
+                except EOFError:
                     break
-                if not user_input:
-                    continue
-                
-                # Use geister ask with agent context
-                import subprocess
-                cmd = [
-                    "geister", "ask", user_input,
-                    "--agent-id", agent_id,
-                    "--persona", persona,
-                ]
-                if realm:
-                    cmd.extend(["--realm", realm])
-                
-                subprocess.run(cmd)
-                print()
-                
-            except EOFError:
-                break
-                
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Session ended[/yellow]")
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Session ended[/yellow]")
+    else:
+        # Single question mode
+        console.print(f"[dim]🤖 Agent: {display_name or agent_id} ({persona or 'default'})[/dim]")
+        console.print(f"[dim]Asking: {question}[/dim]\n")
+        console.print("[bold green]Agent:[/bold green] ", end="")
+        response = send_question(question)
+        
+        # Save to memory
+        if memory and response:
+            try:
+                memory.remember(
+                    action_type="conversation",
+                    action_summary=f"Asked: {question[:100]}...",
+                    action_details={"question": question, "answer": response},
+                    realm_principal=realm
+                )
+                console.print("[dim]💾 Saved to agent memory[/dim]")
+            except Exception as e:
+                console.print(f"[yellow]⚠️  Could not save to memory: {e}[/yellow]")
+
+
+@agent_app.command("inspect")
+def agent_inspect(
+    agent_id: str = typer.Argument(..., help="Agent ID to inspect"),
+):
+    """Show all data for an agent (profile, memories, conversations)."""
+    try:
+        from agent_memory import AgentMemory
+        from database.db_client import DatabaseClient
+        
+        memory = AgentMemory(agent_id)
+        db_client = DatabaseClient()
+        
+        console.print(f"\n[bold]Agent: {agent_id}[/bold]")
+        console.print("=" * 60)
+        
+        # Profile
+        profile = memory.get_profile()
+        if profile:
+            console.print("\n[bold cyan]Profile:[/bold cyan]")
+            console.print(f"  Display Name: {profile.get('display_name', 'N/A')}")
+            console.print(f"  Persona: {profile.get('persona', 'N/A')}")
+            console.print(f"  Principal: {profile.get('principal', 'N/A')}")
+            console.print(f"  Total Sessions: {profile.get('total_sessions', 0)}")
+            if profile.get('metadata'):
+                console.print(f"  Background: {profile.get('metadata')}")
+        else:
+            console.print("\n[dim]No profile found[/dim]")
+        
+        # Memories
+        memories = memory.get_memories(limit=10)
+        if memories:
+            console.print(f"\n[bold cyan]Recent Memories ({len(memories)}):[/bold cyan]")
+            for mem in memories:
+                console.print(f"  [{mem.get('action_type')}] {mem.get('action_summary')}")
+                if mem.get('observations'):
+                    console.print(f"    → {mem.get('observations')[:100]}...")
+        else:
+            console.print("\n[dim]No memories found[/dim]")
+        
+        # Conversations (from database)
+        try:
+            conversations = db_client.get_conversations_by_user(agent_id, limit=5)
+            if conversations:
+                console.print(f"\n[bold cyan]Recent Conversations ({len(conversations)}):[/bold cyan]")
+                for conv in conversations:
+                    q = conv.get('question', '')[:60]
+                    console.print(f"  Q: {q}...")
+        except:
+            pass
+        
+        console.print()
+        
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[red]Error inspecting agent: {e}[/red]")
         raise typer.Exit(1)
 
 
@@ -386,135 +529,6 @@ def server_status():
 
 
 # =============================================================================
-# Ask Command
-# =============================================================================
-
-@app.command("ask")
-def ask_question(
-    question: str = typer.Argument(..., help="Question to ask Geister"),
-    api_url: Optional[str] = typer.Option(None, "--api-url", "-u", help="Geister API URL (or set GEISTER_API_URL)"),
-    persona: Optional[str] = typer.Option(None, "--persona", "-p", help="Persona to use"),
-    realm_principal: Optional[str] = typer.Option(None, "--realm", "-r", help="Realm principal ID"),
-    ollama_url: Optional[str] = typer.Option(None, "--ollama-url", help="Ollama URL (or set OLLAMA_HOST)"),
-    stream: bool = typer.Option(True, "--stream/--no-stream", help="Stream response in real-time"),
-    agent_id: Optional[str] = typer.Option(None, "--agent-id", "-a", help="Agent ID for memory persistence (requires local PostgreSQL)"),
-    agent_name: Optional[str] = typer.Option(None, "--agent-name", "-n", help="Display name for the agent"),
-):
-    """Ask Geister a question."""
-    import requests
-    
-    # Resolve API URL from env or default
-    resolved_api_url = api_url or os.getenv("GEISTER_API_URL", "https://geister-api.realmsgos.dev")
-    # Ensure URL has scheme
-    if not resolved_api_url.startswith("http"):
-        resolved_api_url = f"https://{resolved_api_url}"
-    
-    resolved_ollama_url = ollama_url or os.getenv("OLLAMA_HOST", "http://localhost:11434")
-    
-    # Handle agent memory if agent_id is provided
-    memory = None
-    display_name = agent_name
-    agent_background = None
-    if agent_id:
-        try:
-            from agent_memory import AgentMemory
-            memory = AgentMemory(agent_id, persona=persona)
-            
-            # Load existing profile if available
-            profile = memory.get_profile()
-            if profile:
-                # Use stored values unless overridden by CLI flags
-                if not agent_name:
-                    display_name = profile.get('display_name') or agent_id
-                if not persona:
-                    persona = profile.get('persona')
-                # Get background metadata
-                agent_background = profile.get('metadata')
-            
-            # Update/create profile if new values provided (generates background if new)
-            if agent_name or not profile:
-                profile = memory.ensure_profile(display_name=agent_name)
-                if agent_name:
-                    display_name = agent_name
-                if not agent_background:
-                    agent_background = profile.get('metadata')
-            
-            console.print(f"[dim]🤖 Agent: {display_name or agent_id} ({persona or 'default'})[/dim]")
-        except Exception as e:
-            console.print(f"[yellow]⚠️  Could not load agent memory: {e}[/yellow]")
-            console.print("[dim]Continuing without memory persistence...[/dim]")
-    
-    console.print(f"[dim]Asking Geister: {question}[/dim]\n")
-    
-    full_response = ""
-    
-    if stream:
-        # Use streaming endpoint for real-time feedback
-        try:
-            url = f"{resolved_api_url}/api/ask"
-            # Get user's dfx principal for conversation tracking
-            user_principal = get_current_user_principal()
-            payload = {
-                "question": question,
-                "user_principal": user_principal,
-                "agent_id": agent_id,  # Agent identity for memory separation
-                "realm_principal": realm_principal or "",
-                "persona": persona or "",
-                "agent_name": display_name or "",
-                "agent_background": agent_background,
-                "ollama_url": resolved_ollama_url,
-                "stream": True
-            }
-            
-            console.print("[bold green]Geister:[/bold green] ", end="")
-            
-            with requests.post(url, json=payload, stream=True, timeout=300) as response:
-                response.raise_for_status()
-                for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
-                    if chunk:
-                        print(chunk, end="", flush=True)
-                        full_response += chunk
-            
-            print()  # Final newline
-            
-        except requests.exceptions.RequestException as e:
-            console.print(f"[red]Error: {e}[/red]")
-    else:
-        # Non-streaming mode with spinner
-        from rich.status import Status
-        from ashoka_cli import AshokaClient
-        
-        client = AshokaClient(base_url=resolved_api_url)
-        
-        with Status("[bold blue]Thinking...[/bold blue]", spinner="dots") as status:
-            result = client.ask_question(
-                question=question,
-                persona=persona or "",
-                realm_principal=realm_principal or "",
-                ollama_url=resolved_ollama_url
-            )
-        
-        if "answer" in result:
-            full_response = result['answer']
-            console.print(f"[bold green]Geister:[/bold green] {full_response}")
-        else:
-            console.print(f"[yellow]Response:[/yellow] {result}")
-    
-    # Save to agent memory if enabled
-    if memory and full_response:
-        try:
-            memory.remember(
-                action_type="conversation",
-                action_summary=f"Asked: {question[:100]}...",
-                action_details={"question": question, "answer": full_response},
-                realm_principal=realm_principal
-            )
-            console.print("[dim]💾 Saved to agent memory[/dim]")
-        except Exception as e:
-            console.print(f"[yellow]⚠️  Could not save to memory: {e}[/yellow]")
-
-
-# =============================================================================
 # Personas Command
 # =============================================================================
 
@@ -541,10 +555,8 @@ def _check_api_connection(url: str, timeout: int = 5) -> tuple:
     """Check if Geister API is reachable. Returns (is_ok, message)."""
     import requests
     try:
-        # Ensure URL has scheme
         if not url.startswith("http"):
             url = f"https://{url}"
-        # Root endpoint returns {"status": "ok", ...}
         response = requests.get(url.rstrip('/'), timeout=timeout)
         if response.status_code == 200:
             try:
@@ -576,13 +588,11 @@ def _make_env_table(title: str, env_vars: dict):
     for var_name, (description, default) in env_vars.items():
         current = os.getenv(var_name)
         
-        # Mask sensitive values
         if var_name in ("DB_PASS", "RUNPOD_API_KEY") and current:
             display_value = current[:4] + "***" + current[-4:] if len(current) > 8 else "***"
         else:
             display_value = current or "[dim]not set[/dim]"
         
-        # Highlight if set vs using default
         if current:
             display_value = f"[green]{display_value}[/green]"
         else:
@@ -605,18 +615,15 @@ def status(
     console.print()
     console.print(_make_env_table("Server Mode", SERVER_ENV_VARS))
     
-    # Connection checks
     if check:
         console.print()
         console.print("[bold]Connection Status:[/bold]")
         
-        # Check Geister API
         api_url = os.getenv("GEISTER_API_URL", "https://geister-api.realmsgos.dev")
         ok, msg = _check_api_connection(api_url)
         color = "green" if ok else "red"
         console.print(f"  Geister API ({api_url}): [{color}]{msg}[/{color}]")
         
-        # Check Ollama - prefer GEISTER_OLLAMA_URL (tunnel) over OLLAMA_HOST (direct)
         ollama_url = os.getenv("GEISTER_OLLAMA_URL", "https://geister-ollama.realmsgos.dev")
         try:
             if not ollama_url.startswith("http"):
