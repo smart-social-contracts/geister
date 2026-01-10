@@ -264,7 +264,7 @@ def agent_ask(
     resolved_api_url = api_url or get_api_url()
     if not resolved_api_url.startswith("http"):
         resolved_api_url = f"https://{resolved_api_url}"
-    resolved_ollama_url = ollama_url or os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    resolved_ollama_url = ollama_url or os.getenv("GEISTER_OLLAMA_URL") or os.getenv("OLLAMA_HOST", "http://localhost:11434")
     
     # Load agent profile
     memory = None
