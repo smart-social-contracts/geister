@@ -25,6 +25,26 @@ def log(message):
     """Helper function to print with flush=True for better logging"""
     print(message, flush=True)
 
+
+def get_realm_principal_from_folder(realm_folder: str, network: str = "staging") -> str:
+    """Extract realm_principal from canister_ids.json in realm_folder."""
+    try:
+        canister_ids_path = Path(realm_folder) / "canister_ids.json"
+        if canister_ids_path.exists():
+            with open(canister_ids_path) as f:
+                canister_ids = json.load(f)
+                # Look for realm_backend canister ID for the network
+                if "realm_backend" in canister_ids:
+                    realm_backend = canister_ids["realm_backend"]
+                    if network in realm_backend:
+                        return realm_backend[network]
+                    # Try 'ic' as fallback
+                    if "ic" in realm_backend:
+                        return realm_backend["ic"]
+    except Exception as e:
+        log(f"Could not get realm_principal from {realm_folder}: {e}")
+    return ""
+
 app = Flask(__name__)
 # Enable CORS with explicit configuration to allow cross-origin requests from any origin
 CORS(app, 
@@ -490,6 +510,20 @@ def ask():
                     
                     log(f"Tool result: {tool_result[:500]}..." if len(tool_result) > 500 else f"Tool result: {tool_result}")
                     
+                    # Store realm_status result to database if tool was realm_status
+                    if tool_name == "realm_status" and tool_result:
+                        try:
+                            # Get realm_principal from canister_ids.json if not provided
+                            effective_realm_principal = realm_principal or get_realm_principal_from_folder(realm_folder, network)
+                            if effective_realm_principal:
+                                result_data = json.loads(tool_result)
+                                if "error" not in result_data:
+                                    realm_url = f"https://{effective_realm_principal}.ic0.app"
+                                    db_client.store_realm_status(effective_realm_principal, realm_url, result_data)
+                                    log(f"Stored realm_status to database for {effective_realm_principal}")
+                        except Exception as e:
+                            log(f"Failed to store realm_status: {e}")
+                    
                     # Add tool result to messages
                     messages.append({
                         "role": "tool",
@@ -576,6 +610,20 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
                 tool_result = execute_tool(tool_name, tool_args, network=network, realm_folder=realm_folder)
                 
                 log(f"Tool result: {tool_result[:500]}..." if len(tool_result) > 500 else f"Tool result: {tool_result}")
+                
+                # Store realm_status result to database if tool was realm_status
+                if tool_name == "realm_status" and tool_result:
+                    try:
+                        # Get realm_principal from canister_ids.json if not provided
+                        effective_realm_principal = realm_principal or get_realm_principal_from_folder(realm_folder, network)
+                        if effective_realm_principal:
+                            result_data = json.loads(tool_result)
+                            if "error" not in result_data:
+                                realm_url = f"https://{effective_realm_principal}.ic0.app"
+                                db_client.store_realm_status(effective_realm_principal, realm_url, result_data)
+                                log(f"Stored realm_status to database for {effective_realm_principal}")
+                    except Exception as e:
+                        log(f"Failed to store realm_status: {e}")
                 
                 # Add tool result to messages
                 messages.append({
