@@ -698,10 +698,8 @@ def _make_env_table(title: str, env_vars: dict):
 
 
 @app.command("status")
-def status(
-    check: bool = typer.Option(False, "--check", "-c", help="Check connectivity to API and Ollama"),
-):
-    """Show current configuration and optionally check connectivity."""
+def status():
+    """Show current configuration and check connectivity."""
     import requests
     
     console.print()
@@ -713,51 +711,47 @@ def status(
     current_mode = get_current_mode()
     console.print(f"[bold]Mode:[/bold] {current_mode}")
     
-    if check:
-        console.print()
-        console.print("[bold]Connection Status:[/bold]")
-        
-        api_url = get_api_url()
-        ok, msg = _check_api_connection(api_url)
-        color = "green" if ok else "red"
-        console.print(f"  Geister API ({api_url}): [{color}]{msg}[/{color}]")
-        
-        # Show server version info
-        try:
-            response = requests.get(api_url.rstrip('/'), timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                version = data.get('version')
-                git_commit = data.get('git_commit')
-                git_datetime = data.get('git_commit_datetime')
-                if version or git_commit:
-                    console.print(f"\n[bold]Server Version:[/bold]")
-                    if version:
-                        console.print(f"  Version: [cyan]{version}[/cyan]")
-                    if git_commit:
-                        console.print(f"  Commit: [cyan]{git_commit}[/cyan]")
-                    if git_datetime:
-                        console.print(f"  Date: [cyan]{git_datetime}[/cyan]")
-        except:
-            pass
-        
-        ollama_url = os.getenv("GEISTER_OLLAMA_URL", "https://geister-ollama.realmsgos.dev")
-        try:
-            if not ollama_url.startswith("http"):
-                ollama_url = f"https://{ollama_url}"
-            response = requests.get(f"{ollama_url.rstrip('/')}/api/tags", timeout=5)
-            if response.status_code == 200:
-                models = response.json().get("models", [])
-                console.print(f"  Ollama ({ollama_url}): [green]✅ connected ({len(models)} models)[/green]")
-            else:
-                console.print(f"  Ollama ({ollama_url}): [yellow]⚠️ status {response.status_code}[/yellow]")
-        except requests.exceptions.ConnectionError:
-            console.print(f"  Ollama ({ollama_url}): [red]❌ not reachable[/red]")
-        except Exception as e:
-            console.print(f"  Ollama ({ollama_url}): [red]❌ {str(e)[:30]}[/red]")
-    else:
-        console.print()
-        console.print("[dim]Tip: Use --check to verify connectivity to API and Ollama[/dim]")
+    console.print()
+    console.print("[bold]Connection Status:[/bold]")
+    
+    api_url = get_api_url()
+    ok, msg = _check_api_connection(api_url)
+    color = "green" if ok else "red"
+    console.print(f"  Geister API ({api_url}): [{color}]{msg}[/{color}]")
+    
+    # Show server version info
+    try:
+        response = requests.get(api_url.rstrip('/'), timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            version = data.get('version')
+            git_commit = data.get('git_commit')
+            git_datetime = data.get('git_commit_datetime')
+            if version or git_commit:
+                console.print(f"\n[bold]Server Version:[/bold]")
+                if version:
+                    console.print(f"  Version: [cyan]{version}[/cyan]")
+                if git_commit:
+                    console.print(f"  Commit: [cyan]{git_commit}[/cyan]")
+                if git_datetime:
+                    console.print(f"  Date: [cyan]{git_datetime}[/cyan]")
+    except:
+        pass
+    
+    ollama_url = os.getenv("GEISTER_OLLAMA_URL", "https://geister-ollama.realmsgos.dev")
+    try:
+        if not ollama_url.startswith("http"):
+            ollama_url = f"https://{ollama_url}"
+        response = requests.get(f"{ollama_url.rstrip('/')}/api/tags", timeout=5)
+        if response.status_code == 200:
+            models = response.json().get("models", [])
+            console.print(f"  Ollama ({ollama_url}): [green]✅ connected ({len(models)} models)[/green]")
+        else:
+            console.print(f"  Ollama ({ollama_url}): [yellow]⚠️ status {response.status_code}[/yellow]")
+    except requests.exceptions.ConnectionError:
+        console.print(f"  Ollama ({ollama_url}): [red]❌ not reachable[/red]")
+    except Exception as e:
+        console.print(f"  Ollama ({ollama_url}): [red]❌ {str(e)[:30]}[/red]")
     
     console.print()
 
