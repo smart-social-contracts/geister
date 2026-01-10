@@ -15,8 +15,6 @@ import os
 import time
 import atexit
 from database.db_client import DatabaseClient
-from realm_status_service import RealmStatusService
-from realm_status_scheduler import get_scheduler, start_scheduler, stop_scheduler
 from persona_manager import PersonaManager
 from realm_tools import REALM_TOOLS, execute_tool
 
@@ -40,9 +38,8 @@ persona_manager = PersonaManager()
 # Model configuration with fallback
 ASHOKA_DEFAULT_MODEL = os.getenv('ASHOKA_DEFAULT_MODEL', 'llama3.2:1b')
 
-# Initialize database client and realm status service
+# Initialize database client
 db_client = DatabaseClient()
-realm_status_service = RealmStatusService(db_client)
 
 # Inactivity timeout configuration
 INACTIVITY_TIMEOUT_SECONDS = int(os.getenv('INACTIVITY_TIMEOUT_SECONDS', '0'))  # Default: disabled
@@ -390,7 +387,6 @@ def ask():
     user_principal = data.get('user_principal') or ""
     realm_principal = data.get('realm_principal') or ""
     question = data.get('question')
-    realm_status = data.get('realm_status')  # Optional realm context
     persona_name = data.get('persona')  # Optional persona name
     agent_name = data.get('agent_name')  # Optional agent display name
     agent_background = data.get('agent_background')  # Optional agent background (age, wealth, etc.)
@@ -623,14 +619,6 @@ def get_suggestions():
     ollama_url = request.args.get('ollama_url', 'http://localhost:11434')
     
     try:
-        # Get realm status for context-aware suggestions
-        realm_status = None
-        if realm_principal:
-            try:
-                realm_status = realm_status_service.get_realm_status_summary(realm_principal)
-            except Exception as e:
-                log(f"Error getting realm status for suggestions: {e}")
-        
         # Get conversation history for context
         history_text = ""
         try:
@@ -644,29 +632,19 @@ def get_suggestions():
             log(f"Error: Could not load conversation history for suggestions: {e}")
             history_text = ""
         
-        # Build realm context for suggestions
-        realm_context = build_structured_realm_context(realm_status) if realm_status else ""
-        
         # Get persona content for suggestions
         actual_persona_name, persona_content = persona_manager.get_persona_or_default(persona_name)
         
-        # Create context-aware suggestions based on realm state
-        suggestions_prompt = f"""{persona_content}{realm_context}
+        # Create context-aware suggestions based on conversation history
+        suggestions_prompt = f"""{persona_content}
 
 CONVERSATION_HISTORY:
 {history_text}
 
-Based on the realm status and conversation history above, generate 3 relevant follow-up questions that would be most helpful for this user. The suggestions should:
-1. Be tailored to the current realm's state (size, activity level, extensions)
-2. Address the most relevant governance topics for this realm
-3. Be concise and actionable (under 60 characters each)
-4. Help the user understand or improve their realm's governance
-
-For example:
-- If the realm has low activity, suggest engagement strategies
-- If the realm has no organizations, suggest community structure questions
-- If the realm has extensions, suggest questions about their usage
-- If there's voting activity, suggest participation improvement questions
+Based on the conversation history above, generate 3 relevant follow-up questions that would be most helpful for this user. The suggestions should:
+1. Address relevant governance topics
+2. Be concise and actionable (under 60 characters each)
+3. Help the user understand or improve their realm's governance
 
 Format your response as exactly 3 questions, one per line, with no numbering or bullet points:"""
 
@@ -698,51 +676,10 @@ Format your response as exactly 3 questions, one per line, with no numbering or 
             
             # Ensure we have exactly 3 suggestions with smart fallbacks
             if len(suggestions) < 3:
-                # Context-aware fallback suggestions based on realm status
-                fallback_suggestions = []
-                
-                if realm_status:
-                    status_data = realm_status.get('status_data', {})
-                    users_count = status_data.get('users_count', 0)
-                    organizations_count = status_data.get('organizations_count', 0)
-                    proposals_count = status_data.get('proposals_count', 0)
-                    extensions = status_data.get('extensions', [])
-                    
-                    if users_count == 0:
-                        fallback_suggestions = [
-                            "How do I invite users to this realm?",
-                            "What are the first steps to set up governance?",
-                            "How do I configure realm settings?"
-                        ]
-                    elif organizations_count == 0:
-                        fallback_suggestions = [
-                            "How do I create organizations in this realm?",
-                            "What governance structure should we adopt?",
-                            "How do we encourage community participation?"
-                        ]
-                    elif proposals_count == 0:
-                        fallback_suggestions = [
-                            "How do I create the first proposal?",
-                            "What topics should we vote on first?",
-                            "How do we increase voting participation?"
-                        ]
-                    elif len(extensions) == 0:
-                        fallback_suggestions = [
-                            "What extensions should we install?",
-                            "How do extensions improve governance?",
-                            "What features are missing in our realm?"
-                        ]
-                    else:
-                        fallback_suggestions = [
-                            "How can we improve our governance health score?",
-                            "What governance best practices should we adopt?",
-                            "How do we measure our realm's success?"
-                        ]
-                else:
-                    fallback_suggestions = [
-                        "What is a realm?",
-                        "How does decentralized governance work?",
-                        "What can an AI governance assistant do?"
+                fallback_suggestions = [
+                    "What is a realm?",
+                    "How does decentralized governance work?",
+                    "What can an AI governance assistant do?"
                     ]
                 
                 suggestions.extend(fallback_suggestions[len(suggestions):3])
@@ -771,267 +708,6 @@ Format your response as exactly 3 questions, one per line, with no numbering or 
             "suggestions": suggestions,
             "persona_used": persona_manager.default_persona
         })
-
-@app.route('/api/realm-status/fetch', methods=['POST'])
-def fetch_realm_status():
-    """Fetch and store status for a specific realm using DFX"""
-    update_activity()
-    
-    data = request.json
-    realm_principal = data.get('realm_principal')
-    realm_url = data.get('realm_url')  # Optional, will be constructed if not provided
-    network = data.get('network', 'ic')  # Default to IC mainnet
-    
-    if not realm_principal:
-        return jsonify({"error": "Missing required field: realm_principal"}), 400
-    
-    try:
-        success = realm_status_service.fetch_and_store_realm_status(realm_principal, realm_url, network)
-        
-        if success:
-            return jsonify({
-                "success": True,
-                "message": f"Successfully fetched and stored status for realm {realm_principal} via DFX"
-            })
-        else:
-            return jsonify({
-                "success": False,
-                "error": f"Failed to fetch status for realm {realm_principal} via DFX"
-            }), 500
-            
-    except Exception as e:
-        log(f"Error fetching realm status: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/realm-status/batch-fetch', methods=['POST'])
-def batch_fetch_realm_status():
-    """Fetch and store status for multiple realms using DFX"""
-    update_activity()
-    
-    data = request.json
-    realms = data.get('realms', [])
-    network = data.get('network', 'ic')  # Default to IC mainnet
-    
-    if not realms:
-        return jsonify({"error": "Missing required field: realms (array of {principal, url} objects)"}), 400
-    
-    try:
-        results = realm_status_service.fetch_multiple_realms_status(realms, network)
-        
-        successful_count = sum(1 for success in results.values() if success)
-        total_count = len(results)
-        
-        return jsonify({
-            "success": True,
-            "results": results,
-            "summary": {
-                "total_realms": total_count,
-                "successful_fetches": successful_count,
-                "failed_fetches": total_count - successful_count,
-                "network": network
-            }
-        })
-        
-    except Exception as e:
-        log(f"Error batch fetching realm status: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/realm-status/<realm_principal>', methods=['GET'])
-def get_realm_status(realm_principal):
-    """Get the latest status for a specific realm"""
-    update_activity()
-    
-    try:
-        summary = realm_status_service.get_realm_status_summary(realm_principal)
-        
-        if summary:
-            return jsonify({
-                "success": True,
-                "data": summary
-            })
-        else:
-            return jsonify({
-                "success": False,
-                "error": f"No status data found for realm {realm_principal}"
-            }), 404
-            
-    except Exception as e:
-        log(f"Error getting realm status: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/realm-status/<realm_principal>/history', methods=['GET'])
-def get_realm_status_history(realm_principal):
-    """Get status history for a specific realm"""
-    update_activity()
-    
-    limit = request.args.get('limit', 10, type=int)
-    
-    try:
-        history = db_client.get_realm_status_history(realm_principal, limit)
-        
-        return jsonify({
-            "success": True,
-            "data": history,
-            "count": len(history)
-        })
-        
-    except Exception as e:
-        log(f"Error getting realm status history: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/realm-status/all', methods=['GET'])
-def get_all_realms_status():
-    """Get latest status summary for all tracked realms"""
-    update_activity()
-    
-    try:
-        summaries = realm_status_service.get_all_realms_summary()
-        
-        return jsonify({
-            "success": True,
-            "data": summaries,
-            "count": len(summaries)
-        })
-        
-    except Exception as e:
-        log(f"Error getting all realms status: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/realm-status/scheduler/status', methods=['GET'])
-def get_scheduler_status():
-    """Get realm status scheduler information"""
-    update_activity()
-    
-    try:
-        scheduler = get_scheduler()
-        status = scheduler.get_status()
-        
-        return jsonify({
-            "success": True,
-            "data": status
-        })
-        
-    except Exception as e:
-        log(f"Error getting scheduler status: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/realm-status/scheduler/start', methods=['POST'])
-def start_realm_scheduler():
-    """Start the realm status scheduler"""
-    update_activity()
-    
-    try:
-        scheduler = get_scheduler()
-        scheduler.start()
-        
-        return jsonify({
-            "success": True,
-            "message": "Realm status scheduler started"
-        })
-        
-    except Exception as e:
-        log(f"Error starting scheduler: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/realm-status/scheduler/stop', methods=['POST'])
-def stop_realm_scheduler():
-    """Stop the realm status scheduler"""
-    update_activity()
-    
-    try:
-        scheduler = get_scheduler()
-        scheduler.stop()
-        
-        return jsonify({
-            "success": True,
-            "message": "Realm status scheduler stopped"
-        })
-        
-    except Exception as e:
-        log(f"Error stopping scheduler: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/realm-status/scheduler/fetch-now', methods=['POST'])
-def trigger_immediate_fetch():
-    """Trigger an immediate status fetch for all configured realms"""
-    update_activity()
-    
-    try:
-        scheduler = get_scheduler()
-        results = scheduler.fetch_now()
-        
-        successful_count = sum(1 for success in results.values() if success)
-        total_count = len(results)
-        
-        return jsonify({
-            "success": True,
-            "results": results,
-            "summary": {
-                "total_realms": total_count,
-                "successful_fetches": successful_count,
-                "failed_fetches": total_count - successful_count
-            }
-        })
-        
-    except Exception as e:
-        log(f"Error triggering immediate fetch: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/realm-status/scheduler/realms', methods=['POST'])
-def add_realm_to_scheduler():
-    """Add a realm to the scheduler configuration"""
-    update_activity()
-    
-    data = request.json
-    realm_principal = data.get('realm_principal')
-    realm_url = data.get('realm_url')
-    name = data.get('name')
-    
-    if not realm_principal or not realm_url:
-        return jsonify({"error": "Missing required fields: realm_principal and realm_url"}), 400
-    
-    try:
-        scheduler = get_scheduler()
-        success = scheduler.add_realm(realm_principal, realm_url, name)
-        
-        if success:
-            return jsonify({
-                "success": True,
-                "message": f"Added realm {realm_principal} to scheduler configuration"
-            })
-        else:
-            return jsonify({
-                "success": False,
-                "error": f"Realm {realm_principal} already exists in configuration"
-            }), 400
-            
-    except Exception as e:
-        log(f"Error adding realm to scheduler: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/api/realm-status/scheduler/realms/<realm_principal>', methods=['DELETE'])
-def remove_realm_from_scheduler(realm_principal):
-    """Remove a realm from the scheduler configuration"""
-    update_activity()
-    
-    try:
-        scheduler = get_scheduler()
-        success = scheduler.remove_realm(realm_principal)
-        
-        if success:
-            return jsonify({
-                "success": True,
-                "message": f"Removed realm {realm_principal} from scheduler configuration"
-            })
-        else:
-            return jsonify({
-                "success": False,
-                "error": f"Realm {realm_principal} not found in configuration"
-            }), 404
-            
-    except Exception as e:
-        log(f"Error removing realm from scheduler: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
 
 @app.route('/', methods=['GET'])
 def health():
