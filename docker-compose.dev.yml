@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  geister-dev:
+    image: docker.io/smartsocialcontracts/geister:latest
+    container_name: geister-dev
+    ports:
+      - "5000:5000"      # Flask API
+      - "11434:11434"    # Ollama
+      - "5432:5432"      # PostgreSQL
+    volumes:
+      # Mount local code for instant changes
+      - .:/workspace/geister
+      # Persist Ollama models
+      - ollama_data:/workspace/ollama
+      # Persist PostgreSQL data
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - OLLAMA_HOST=localhost:11434
+    stdin_open: true
+    tty: true
+    command: bash -c "
+      service postgresql start &&
+      ollama serve &
+      sleep 5 &&
+      cd /workspace/geister &&
+      python api.py
+      "
+
+volumes:
+  ollama_data:
+  postgres_data:

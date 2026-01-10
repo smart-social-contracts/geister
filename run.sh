@@ -4,7 +4,13 @@ set -e # Exit on error
 set -x # Print commands
 
 # Start SSH server in the background
-echo $SSH_AUTH_KEY >> ~/.ssh/authorized_keys
+# RunPod passes keys via PUBLIC_KEY env var
+if [ -n "$PUBLIC_KEY" ]; then
+    echo "$PUBLIC_KEY" >> ~/.ssh/authorized_keys
+fi
+if [ -n "$SSH_AUTH_KEY" ]; then
+    echo "$SSH_AUTH_KEY" >> ~/.ssh/authorized_keys
+fi
 /usr/sbin/sshd -D -p 2222 &
 
 # Create logs directory if it doesn't exist
