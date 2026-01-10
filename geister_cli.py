@@ -59,6 +59,7 @@ app = typer.Typer(
     help="Geister - AI Governance Agents for Realms. Use 'geister status' to see environment variables.",
     no_args_is_help=True,
     rich_markup_mode="rich",
+    add_completion=False,
 )
 console = Console()
 
