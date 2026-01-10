@@ -30,13 +30,7 @@ jobs:
       - name: Determine image tags
         id: tags
         run: |
-          if [ "${{ github.ref_name }}" = "main" ]; then
-            echo "tags=smartsocialcontracts/geister:latest smartsocialcontracts/geister:main" >> $GITHUB_OUTPUT
-            echo "pod_type=main" >> $GITHUB_OUTPUT
-          else
-            echo "tags=smartsocialcontracts/geister:branch" >> $GITHUB_OUTPUT
-            echo "pod_type=branch" >> $GITHUB_OUTPUT
-          fi
+          echo "tags=smartsocialcontracts/geister:latest smartsocialcontracts/geister:main" >> $GITHUB_OUTPUT
 
       - name: Build and tag Docker images
         run: |
@@ -54,5 +48,5 @@ jobs:
 
       - name: Restart RunPod pod to pick up new image
         run: |
-          python pod_manager.py ${{ steps.tags.outputs.pod_type }} terminate || true
-          python pod_manager.py ${{ steps.tags.outputs.pod_type }} deploy -v
+          python pod_manager.py main terminate || true
+          python pod_manager.py main deploy -v

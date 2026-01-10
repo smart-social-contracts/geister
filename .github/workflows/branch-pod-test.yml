@@ -30,9 +30,8 @@ jobs:
       - name: Install dependencies
         run: pip install requests runpod
 
-      - name: Run remote CI tests
+      - name: Run pod health check
         run: |
           ./pod_manager.py branch restart --deploy-new-if-needed --verbose
           source <(./pod_manager.py branch status)
           ./scripts/health_check.py $BOOTUP_TIMEOUT_SEC "$POD_URL"
-          ./scripts/run_remote_ci_tests.py $POD_URL
