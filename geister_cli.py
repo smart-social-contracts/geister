@@ -722,6 +722,17 @@ def status(
         color = "green" if ok else "red"
         console.print(f"  Geister API ({api_url}): [{color}]{msg}[/{color}]")
         
+        # Show server git commit
+        try:
+            response = requests.get(api_url.rstrip('/'), timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                git_commit = data.get('git_commit')
+                if git_commit:
+                    console.print(f"  Server git commit: [cyan]{git_commit}[/cyan]")
+        except:
+            pass
+        
         ollama_url = os.getenv("GEISTER_OLLAMA_URL", "https://geister-ollama.realmsgos.dev")
         try:
             if not ollama_url.startswith("http"):

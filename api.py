@@ -721,6 +721,15 @@ Format your response as exactly 3 questions, one per line, with no numbering or 
             "persona_used": persona_manager.default_persona
         })
 
+def get_git_commit():
+    """Get current git commit hash."""
+    try:
+        import subprocess
+        result = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=5)
+        return result.stdout.strip() if result.returncode == 0 else None
+    except:
+        return None
+
 @app.route('/', methods=['GET'])
 def health():
     # Update activity timestamp
@@ -728,6 +737,7 @@ def health():
     
     return jsonify({
         "status": "ok",
+        "git_commit": get_git_commit(),
         "inactivity_timeout_seconds": INACTIVITY_TIMEOUT_SECONDS,
         "seconds_since_last_activity": int(time.time() - last_activity_time) if INACTIVITY_TIMEOUT_SECONDS > 0 else None
     })
