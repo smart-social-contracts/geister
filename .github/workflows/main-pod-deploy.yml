@@ -1,18 +1,11 @@
-name: Main Pod Test
+name: Main Pod Deploy
 
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows: ["Build and Push to Docker Hub"]
-    types:
-      - completed
-    branches:
-      - main
 
 jobs:
-  test-main-pod:
+  deploy-main-pod:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       GEISTER_API_URL: https://geister-api.realmsgos.dev
