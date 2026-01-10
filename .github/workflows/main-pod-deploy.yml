@@ -37,9 +37,10 @@ jobs:
       - name: Test basic ask functionality
         run: |
           echo "🤖 Testing basic ask..."
-          geister ask "Hello, are you working?" --api-url "$GEISTER_API_URL"
+          geister agent generate 1
+          geister agent ask 1 "Hello, are you working?" --api-url "$GEISTER_API_URL"
 
       - name: Test realm tool integration
         run: |
           echo "🏛️ Testing realm tool integration..."
-          geister ask "Please describe the realm at staging" --api-url "$GEISTER_API_URL"
+          geister agent ask 1 "Please describe the realm at staging" --api-url "$GEISTER_API_URL"
