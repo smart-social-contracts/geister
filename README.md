@@ -1,14 +1,6 @@
 # Geister
 
-AI-powered governance agents for [Realms GOS](https://github.com/smart-social-contracts/realms). Geister provides intelligent responses to governance questions using multiple AI personas, powered by LLMs.
-
-## Features
-
-- **Multi-Persona AI Agents**: Specialized personas (Compliant, Exploiter, Watchful)
-- **Realm Integration**: Context-aware responses using real-time realm data
-- **Client/Server Architecture**: Run locally or connect to remote API
-- **RunPod Cloud Deployment**: Scalable GPU-powered infrastructure
-- **Agent Swarm**: Run multiple agents in parallel
+AI governance agents for [Realms](https://github.com/smart-social-contracts/realms).
 
 ## Installation
 
@@ -19,156 +11,87 @@ pip install -e .
 ## Quick Start
 
 ```bash
-# Check configuration and connectivity
+# Check status
 geister status --check
 
-# Ask a question
-geister ask "What proposals need attention?"
-
-# List available personas
-geister personas
-```
-
-## Architecture
-
-Geister uses a **client/server architecture**:
-
-| Command | Runs Where | What it does |
-|---------|------------|--------------|
-| `geister ask` | Client → API | Sends question to server, which uses Ollama |
-| `geister status` | Client only | Checks env vars and pings endpoints |
-| `geister personas` | Client only | Lists local persona definitions |
-| `geister swarm` | Client → API | Runs agent swarm, agents call API |
-| `geister agent` | Client → API | Runs single agent, calls API |
-| `geister pod` | Client → RunPod | Manages RunPod instances |
-| `geister server start` | Server | Starts the Flask API locally |
-| `geister server status` | Client only | Checks if local server is running |
-
-```
-Your machine (CLI) → GEISTER_API_URL (server) → GEISTER_OLLAMA_URL (LLM)
-```
-
-## Client Commands
-
-### Ask Questions
-
-```bash
-# Simple question
-geister ask "What is quadratic voting?"
-
-# With specific persona
-geister ask "Analyze this budget proposal" --persona advisor
-
-# With realm context
-geister ask "Should we proceed?" --realm <realm_principal>
-```
-
-### Agent Commands
-
-```bash
-# Run citizen agent
-geister agent citizen --name "Alice"
-
-# Run persona agent
-geister agent persona --persona exploiter
-
-# Run voter agent
-geister agent voter --proposal <proposal_id>
-```
-
-### Swarm Commands
-
-```bash
-# Generate agent identities
-geister swarm generate 10
-
-# Run agent swarm
-geister swarm run --persona compliant
+# Generate agents
+geister agent generate 10
 
 # List agents
-geister swarm list
+geister agent ls
 
-# Cleanup agents
-geister swarm cleanup
+# Talk to an agent (by index or ID)
+geister agent ask 1 "Please join the realm"
+
+# Interactive session
+geister agent ask 1
 ```
 
-### Pod Management (RunPod)
+## Modes
+
+### Remote Mode (default)
+
+Connects to hosted API and Ollama. No local setup required.
 
 ```bash
-# Start pod
-geister pod start main
-
-# Check status
-geister pod status main
-
-# Stop pod
-geister pod stop main
-
-# Deploy new pod
-geister pod deploy main
+export GEISTER_API_URL=https://geister-api.realmsgos.dev
+export GEISTER_OLLAMA_URL=https://geister-ollama.realmsgos.dev
 ```
 
-## Server Commands
+### Local Mode
+
+Run everything locally. Requires PostgreSQL and Ollama.
 
 ```bash
-# Start local API server (requires PostgreSQL)
-geister server start
-
-# Check if local server is running
-geister server status
-```
-
-### Local Development Setup
-
-```bash
-# Start PostgreSQL via Docker
+# 1. Start PostgreSQL
 docker run -d --name geister-db \
   -e POSTGRES_DB=geister_db \
   -e POSTGRES_USER=geister_user \
   -e POSTGRES_PASSWORD=geister_pass \
   -p 5432:5432 postgres:15-alpine
 
-# Initialize schema
+# 2. Initialize schema
 PGPASSWORD=geister_pass psql -h localhost -U geister_user -d geister_db -f database/schema.sql
 
-# Start server
-DB_PASS=geister_pass geister server start
+# 3. Start local Ollama
+ollama serve
+
+# 4. Configure environment
+export GEISTER_API_URL=http://localhost:5000
+export OLLAMA_HOST=http://localhost:11434
+export DB_PASS=geister_pass
+
+# 5. Start API server
+geister server start
+
+# 6. In another terminal, use the CLI
+geister agent ask 1 "Hello"
 ```
 
-## Configuration
+## Commands
 
-### Client Mode (connect to remote API)
-
-```bash
-export GEISTER_API_URL=https://geister-api.realmsgos.dev
-export GEISTER_OLLAMA_URL=https://geister-ollama.realmsgos.dev
-export GEISTER_NETWORK=staging
-export GEISTER_MODEL=gpt-oss:20b
-export RUNPOD_API_KEY=your_key
+```
+geister
+├── agent
+│   ├── ls              # List agents
+│   ├── generate <n>    # Create n agent identities
+│   ├── ask <id> [q]    # Ask question or start chat
+│   ├── inspect <id>    # Show agent data
+│   └── rm <id>/--all   # Remove agent(s)
+├── pod                 # RunPod management
+├── server              # Local server commands
+├── status              # Show configuration
+├── personas            # List personas
+└── version             # Show version
 ```
 
-### Server Mode (run local server)
+## Environment Variables
 
-```bash
-export DB_HOST=localhost
-export DB_NAME=geister_db
-export DB_USER=geister_user
-export DB_PASS=your_password
-export DB_PORT=5432
-```
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GEISTER_API_URL` | API endpoint | `https://geister-api.realmsgos.dev` |
+| `GEISTER_OLLAMA_URL` | Ollama endpoint | `https://geister-ollama.realmsgos.dev` |
+| `OLLAMA_HOST` | Local Ollama | `http://localhost:11434` |
+| `DB_PASS` | Database password | - |
 
-Use `geister status` to see current configuration.
-
-## File Structure
-
-- `geister_cli.py` - Main CLI entry point
-- `api.py` - HTTP API service
-- `persona_manager.py` - Multi-persona system
-- `agent_swarm.py` - Agent swarm management
-- `citizen_agent.py` - Citizen agent implementation
-- `persona_agent.py` - Persona agent implementation
-- `voter_agent.py` - Voter agent implementation
-- `pod_manager.py` - RunPod instance management
-- `database/` - Database client and schema
-- `prompts/personas/` - AI persona definitions
-- `cloudflared/` - Cloudflare tunnel configuration
+Run `geister status` to see current configuration.
