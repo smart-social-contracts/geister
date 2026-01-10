@@ -155,9 +155,9 @@ def get_principal_for_identity(name: str) -> Optional[str]:
 # Commands
 # =============================================================================
 
-def cmd_generate(count: int, start_index: int = 1):
-    """Generate N agent identities."""
-    log(f"Generating {count} agent identities starting from index {start_index}...")
+def cmd_generate(count: int, start_index: int = 1, persona: str = "compliant"):
+    """Generate N agent identities and database profiles."""
+    log(f"Generating {count} agent identities starting from index {start_index} (persona: {persona})...")
     
     created = 0
     failed = 0
@@ -172,7 +172,18 @@ def cmd_generate(count: int, start_index: int = 1):
         
         if create_identity(name):
             principal = get_principal_for_identity(name)
-            log(f"  [{i:03d}] Created {name} -> {principal[:20]}...")
+            
+            # Create database profile with human name
+            try:
+                from agent_memory import AgentMemory
+                memory = AgentMemory(name, principal=principal, persona=persona)
+                profile = memory.ensure_profile()
+                display_name = profile.get('display_name', name)
+                memory.close()
+                log(f"  [{i:03d}] Created {display_name} ({name}) -> {principal[:20]}...")
+            except Exception as e:
+                log(f"  [{i:03d}] Created {name} -> {principal[:20]}... (no DB profile: {e})")
+            
             created += 1
         else:
             log(f"  [{i:03d}] Failed to create {name}")

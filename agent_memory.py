@@ -20,6 +20,36 @@ from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
 
+# Human first names for agents
+HUMAN_FIRST_NAMES = [
+    "James", "Mary", "John", "Patricia", "Robert", "Jennifer", "Michael", "Linda",
+    "William", "Elizabeth", "David", "Barbara", "Richard", "Susan", "Joseph", "Jessica",
+    "Thomas", "Sarah", "Christopher", "Karen", "Charles", "Lisa", "Daniel", "Nancy",
+    "Matthew", "Betty", "Anthony", "Margaret", "Mark", "Sandra", "Donald", "Ashley",
+    "Steven", "Kimberly", "Paul", "Emily", "Andrew", "Donna", "Joshua", "Michelle",
+    "Kenneth", "Dorothy", "Kevin", "Carol", "Brian", "Amanda", "George", "Melissa",
+    "Timothy", "Deborah", "Ronald", "Stephanie", "Edward", "Rebecca", "Jason", "Sharon",
+    "Jeffrey", "Laura", "Ryan", "Cynthia", "Jacob", "Kathleen", "Gary", "Amy",
+    "Nicholas", "Angela", "Eric", "Shirley", "Jonathan", "Anna", "Stephen", "Brenda",
+    "Larry", "Pamela", "Justin", "Emma", "Scott", "Nicole", "Brandon", "Helen",
+    "Benjamin", "Samantha", "Samuel", "Katherine", "Raymond", "Christine", "Gregory", "Debra",
+    "Frank", "Rachel", "Alexander", "Carolyn", "Patrick", "Janet", "Jack", "Catherine",
+    "Dennis", "Maria", "Jerry", "Heather", "Tyler", "Diane", "Aaron", "Ruth",
+    "Jose", "Julie", "Adam", "Olivia", "Nathan", "Joyce", "Henry", "Virginia",
+    "Douglas", "Victoria", "Zachary", "Kelly", "Peter", "Lauren", "Kyle", "Christina"
+]
+
+
+def generate_human_name(agent_id: str = None) -> str:
+    """Generate a consistent human name for an agent."""
+    if agent_id:
+        # Use agent_id to seed random for consistency
+        random.seed(hash(agent_id) % (2**32))
+    name = random.choice(HUMAN_FIRST_NAMES)
+    if agent_id:
+        random.seed()  # Reset seed
+    return name
+
 
 def generate_agent_background(persona: str = None) -> Dict:
     """Generate random background data for an agent based on persona."""
@@ -141,6 +171,9 @@ class AgentMemory:
                     # Create new profile with auto-generated background
                     if not metadata:
                         metadata = generate_agent_background(self.persona)
+                    # Use human name if no display_name provided
+                    if not display_name:
+                        display_name = generate_human_name(self.agent_id)
                     cursor.execute("""
                         INSERT INTO agent_profiles 
                         (agent_id, principal, display_name, persona, last_active_at, total_sessions, metadata)
@@ -149,7 +182,7 @@ class AgentMemory:
                     """, (
                         self.agent_id,
                         self.principal,
-                        display_name or self.agent_id,
+                        display_name,
                         self.persona,
                         json.dumps(metadata)
                     ))
@@ -372,6 +405,7 @@ def get_agent_memory(agent_id: str, principal: str = None, persona: str = None) 
 
 def list_all_agents() -> List[Dict]:
     """List all agent profiles."""
+    conn = None
     try:
         conn = psycopg2.connect(
             host=os.getenv('DB_HOST', 'localhost'),

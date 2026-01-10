@@ -103,6 +103,30 @@ show_status() {
     fi
 }
 
+clean_local() {
+    echo "🧹 Cleaning Geister local environment..."
+
+    # Stop and remove PostgreSQL container
+    if docker ps -a --format '{{.Names}}' | grep -q "^${DB_CONTAINER}$"; then
+        echo "🐘 Removing PostgreSQL container..."
+        docker rm -f $DB_CONTAINER
+        echo "✅ PostgreSQL container removed"
+    else
+        echo "ℹ️  PostgreSQL container not found"
+    fi
+
+    # Clean up agent identities
+    echo "🤖 Removing agent identities..."
+    geister agent rm --all --confirm
+    echo "✅ Agent identities removed"
+
+    # Switch back to remote mode
+    echo "📌 Setting mode to remote..."
+    geister mode remote
+
+    echo "✅ Clean complete"
+}
+
 case "${1:-}" in
     start)
         start_local
@@ -113,12 +137,16 @@ case "${1:-}" in
     status)
         show_status
         ;;
+    clean)
+        clean_local
+        ;;
     *)
-        echo "Usage: $0 {start|stop|status}"
+        echo "Usage: $0 {start|stop|status|clean}"
         echo ""
         echo "  start   Start PostgreSQL and API server in local mode"
         echo "  stop    Stop PostgreSQL and switch to remote mode"
         echo "  status  Show current status"
+        echo "  clean   Remove PostgreSQL container, agent identities, and reset to remote mode"
         exit 1
         ;;
 esac

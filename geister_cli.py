@@ -199,10 +199,11 @@ def agent_ls():
 def agent_generate(
     count: int = typer.Argument(..., help="Number of agent identities to generate"),
     start: int = typer.Option(1, "--start", "-s", help="Starting index"),
+    persona: str = typer.Option("compliant", "--persona", "-p", help="Persona type (compliant, exploiter, watchful)"),
 ):
     """Generate agent identities (dfx identities for the swarm)."""
     from agent_swarm import cmd_generate
-    cmd_generate(count, start)
+    cmd_generate(count, start, persona=persona)
 
 
 @agent_app.command("rm")
@@ -284,8 +285,8 @@ def agent_ask(
         
         if name or not profile:
             profile = memory.ensure_profile(display_name=name)
-            if name:
-                display_name = name
+            # Always get display_name from profile (may be auto-generated human name)
+            display_name = profile.get('display_name') or display_name or agent_id
             if not agent_background:
                 agent_background = profile.get('metadata')
     except Exception as e:
