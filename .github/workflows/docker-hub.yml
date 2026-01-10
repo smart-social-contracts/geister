@@ -45,8 +45,3 @@ jobs:
             echo "Pushing: $tag"
             docker push "$tag"
           done
-
-      - name: Restart RunPod pod to pick up new image
-        run: |
-          python pod_manager.py main terminate || true
-          python pod_manager.py main deploy -v
