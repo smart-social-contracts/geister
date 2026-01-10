@@ -98,6 +98,30 @@ def get_current_user_principal() -> str:
     return ""
 
 
+def resolve_agent_id(agent_ref: str) -> str:
+    """Resolve agent reference to full agent ID.
+    
+    Accepts either:
+    - Full agent ID: "swarm_agent_001"
+    - Index number: "1" or "001"
+    
+    Returns the full agent ID (e.g., "swarm_agent_001").
+    """
+    # If it's already a full agent ID, return as-is
+    if agent_ref.startswith("swarm_agent_"):
+        return agent_ref
+    
+    # Try to parse as index
+    try:
+        index = int(agent_ref)
+        return f"swarm_agent_{index:03d}"
+    except ValueError:
+        pass
+    
+    # Return as-is if we can't resolve it
+    return agent_ref
+
+
 # =============================================================================
 # Agent Commands
 # =============================================================================
@@ -142,7 +166,7 @@ def agent_generate(
 
 @agent_app.command("rm")
 def agent_rm(
-    agent_id: Optional[str] = typer.Argument(None, help="Agent ID to remove"),
+    agent_ref: Optional[str] = typer.Argument(None, help="Agent ID or index (e.g., swarm_agent_001 or 1)"),
     all_agents: bool = typer.Option(False, "--all", "-a", help="Remove all agents"),
     confirm: bool = typer.Option(False, "--confirm", "-y", help="Skip confirmation"),
 ):
@@ -154,7 +178,8 @@ def agent_rm(
             return
         from agent_swarm import cmd_cleanup
         cmd_cleanup(confirm=True)
-    elif agent_id:
+    elif agent_ref:
+        agent_id = resolve_agent_id(agent_ref)
         if not confirm:
             console.print(f"[yellow]This will delete agent '{agent_id}'.[/yellow]")
             console.print("Run with --confirm to actually delete.")
@@ -174,13 +199,13 @@ def agent_rm(
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")
     else:
-        console.print("[red]Specify an agent_id or use --all[/red]")
+        console.print("[red]Specify an agent ID/index or use --all[/red]")
         raise typer.Exit(1)
 
 
 @agent_app.command("ask")
 def agent_ask(
-    agent_id: str = typer.Argument(..., help="Agent ID (e.g., swarm_agent_001)"),
+    agent_ref: str = typer.Argument(..., help="Agent ID or index (e.g., swarm_agent_001 or 1)"),
     question: Optional[str] = typer.Argument(None, help="Question to ask (omit for interactive mode)"),
     persona: Optional[str] = typer.Option(None, "--persona", "-p", help="Persona type"),
     realm: Optional[str] = typer.Option(None, "--realm", "-r", help="Realm principal ID"),
@@ -190,6 +215,9 @@ def agent_ask(
 ):
     """Ask an agent a question or start interactive chat session."""
     import requests
+    
+    # Resolve agent reference to full ID
+    agent_id = resolve_agent_id(agent_ref)
     
     # Resolve URLs
     resolved_api_url = api_url or os.getenv("GEISTER_API_URL", "https://geister-api.realmsgos.dev")
@@ -310,12 +338,15 @@ def agent_ask(
 
 @agent_app.command("inspect")
 def agent_inspect(
-    agent_id: str = typer.Argument(..., help="Agent ID to inspect"),
+    agent_ref: str = typer.Argument(..., help="Agent ID or index (e.g., swarm_agent_001 or 1)"),
 ):
     """Show all data for an agent (profile, memories, conversations)."""
     try:
         from agent_memory import AgentMemory
         from database.db_client import DatabaseClient
+        
+        # Resolve agent reference to full ID
+        agent_id = resolve_agent_id(agent_ref)
         
         memory = AgentMemory(agent_id)
         db_client = DatabaseClient()
