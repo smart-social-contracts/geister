@@ -51,7 +51,7 @@ class PodManager:
         config.setdefault('MAX_GPU_PRICE', '0.30')
         config.setdefault('MIN_GPU_PRICE', '0.05')
         config.setdefault('GPU_COUNT', '1')
-        config.setdefault('TEMPLATE_ID', '1fnzgryfq6')
+        config.setdefault('TEMPLATE_ID', 'mli5ubi3cf')
         
         # Override MAX_GPU_PRICE if provided via command line
         if self.max_gpu_price is not None:
@@ -502,125 +502,6 @@ class PodManager:
         except Exception as e:
             self._print(f"❌ Deployment failed: {e}", force=True)
             traceback.print_exc()
-            return False
-    
-    def get_pod_ssh_info(self, pod_type: str) -> dict:
-        """Get SSH connection info for a pod using RunPod's SSH proxy"""
-        try:
-            pods = runpod.get_pods()
-            pod_name_prefix = f"geister-{pod_type}-"
-            
-            for pod in pods:
-                pod_name = pod.get('name', '')
-                if pod_name.startswith(pod_name_prefix):
-                    pod_id = pod.get('id')
-                    machine = pod.get('machine', {})
-                    machine_id = machine.get('podHostId') if machine else None
-                    
-                    if pod_id:
-                        # RunPod SSH proxy format: <pod_id>@ssh.runpod.io
-                        return {
-                            'pod_id': pod_id,
-                            'machine_id': machine_id,
-                            'ssh_host': 'ssh.runpod.io',
-                            'ssh_user': pod_id  # Just pod_id for basic SSH
-                        }
-            return None
-        except Exception as e:
-            self._print(f"❌ Error getting SSH info: {e}", force=True)
-            return None
-    
-    def sync_pod(self, pod_type: str, source_dir: str = ".") -> bool:
-        """Sync local code to pod via rsync over SSH (fast deployment)"""
-        self._print(f"Syncing code to {pod_type} pod...")
-        
-        ssh_info = self.get_pod_ssh_info(pod_type)
-        if not ssh_info:
-            self._print("❌ Could not get SSH connection info", force=True)
-            self._print("Make sure the pod is running and has SSH enabled", force=True)
-            return False
-        
-        pod_id = ssh_info['pod_id']
-        ssh_host = ssh_info['ssh_host']
-        
-        self._print(f"SSH: {pod_id}@{ssh_host}")
-        
-        # Files to sync (Python code only, exclude heavy directories)
-        exclude_args = [
-            "--exclude=.git",
-            "--exclude=__pycache__",
-            "--exclude=*.pyc",
-            "--exclude=venv",
-            "--exclude=.venv",
-            "--exclude=env",
-            "--exclude=.env",
-            "--exclude=*.log",
-            "--exclude=node_modules",
-        ]
-        
-        # rsync command using RunPod SSH proxy
-        ssh_key = os.path.expanduser("~/.ssh/id_ed25519")
-        rsync_cmd = [
-            "rsync", "-avz", "--progress",
-            "-e", f"ssh -i {ssh_key} -o StrictHostKeyChecking=no",
-            *exclude_args,
-            f"{source_dir}/",
-            f"{pod_id}@{ssh_host}:/workspace/geister/"
-        ]
-        
-        try:
-            self._print(f"Running rsync to {pod_id}@{ssh_host}...")
-            result = subprocess.run(rsync_cmd, capture_output=True, text=True, timeout=120)
-            
-            if result.returncode == 0:
-                self._print("✅ Code synced successfully!")
-                if not self.verbose:
-                    print("SYNCED")
-                return True
-            else:
-                self._print(f"❌ rsync failed: {result.stderr}", force=True)
-                return False
-                
-        except subprocess.TimeoutExpired:
-            self._print("❌ rsync timed out", force=True)
-            return False
-        except Exception as e:
-            self._print(f"❌ Sync failed: {e}", force=True)
-            return False
-    
-    def restart_api(self, pod_type: str) -> bool:
-        """Restart just the Flask API on the pod (no Docker rebuild)"""
-        self._print(f"Restarting API on {pod_type} pod...")
-        
-        ssh_info = self.get_pod_ssh_info(pod_type)
-        if not ssh_info:
-            self._print("❌ Could not get SSH connection info", force=True)
-            return False
-        
-        pod_id = ssh_info['pod_id']
-        ssh_host = ssh_info['ssh_host']
-        
-        # Command to restart Flask (kill existing and start new)
-        restart_cmd = "pkill -f 'python.*api.py' ; cd /workspace/geister && nohup python api.py > /var/log/api.log 2>&1 &"
-        
-        ssh_key = os.path.expanduser("~/.ssh/id_ed25519")
-        ssh_cmd = [
-            "ssh",
-            "-i", ssh_key,
-            "-o", "StrictHostKeyChecking=no",
-            f"{pod_id}@{ssh_host}",
-            restart_cmd
-        ]
-        
-        try:
-            self._print(f"Sending restart command to {pod_id}@{ssh_host}...")
-            result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=30)
-            self._print("✅ API restart command sent!")
-            if not self.verbose:
-                print("RESTARTED")
-            return True
-        except Exception as e:
-            self._print(f"❌ Restart failed: {e}", force=True)
             return False
     
     def terminate_pod(self, pod_type: str) -> bool:

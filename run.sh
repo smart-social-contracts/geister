@@ -4,13 +4,7 @@ set -e # Exit on error
 set -x # Print commands
 
 # Start SSH server in the background
-# RunPod passes keys via PUBLIC_KEY env var
-if [ -n "$PUBLIC_KEY" ]; then
-    echo "$PUBLIC_KEY" >> ~/.ssh/authorized_keys
-fi
-if [ -n "$SSH_AUTH_KEY" ]; then
-    echo "$SSH_AUTH_KEY" >> ~/.ssh/authorized_keys
-fi
+echo $SSH_AUTH_KEY >> ~/.ssh/authorized_keys
 /usr/sbin/sshd -D -p 2222 &
 
 # Create logs directory if it doesn't exist
@@ -92,13 +86,13 @@ service postgresql start
 sleep 5
 
 echo "Setting up PostgreSQL database..."
-sudo -u postgres createdb geister_db 2>/dev/null || echo "Database already exists"
-sudo -u postgres psql -d geister_db -c 'CREATE USER geister_user WITH PASSWORD '\''geister_pass'\'';' 2>/dev/null || echo "User already exists"
-sudo -u postgres psql -d geister_db -c 'GRANT ALL PRIVILEGES ON DATABASE geister_db TO geister_user;' 2>/dev/null || echo "Privileges already granted"
+sudo -u postgres createdb ashoka_db 2>/dev/null || echo "Database already exists"
+sudo -u postgres psql -d ashoka_db -c "CREATE USER ashoka_user WITH PASSWORD 'ashoka_pass';" 2>/dev/null || echo "User already exists"
+sudo -u postgres psql -d ashoka_db -c "GRANT ALL PRIVILEGES ON DATABASE ashoka_db TO ashoka_user;" 2>/dev/null || echo "Privileges already granted"
 
 if [ -f "database/schema.sql" ]; then
     echo "Initializing database schema..."
-    sudo -u postgres psql -d geister_db -f database/schema.sql 2>/dev/null || echo "Schema already initialized"
+    sudo -u postgres psql -d ashoka_db -f database/schema.sql 2>/dev/null || echo "Schema already initialized"
 fi
 
 
