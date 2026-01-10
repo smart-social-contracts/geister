@@ -79,6 +79,23 @@ DEFAULT_MODEL = os.getenv("GEISTER_MODEL", "gpt-oss:20b")
 DEFAULT_REALM_FOLDER = "."
 
 
+def get_current_user_principal() -> str:
+    """Get the current user's dfx identity principal."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["dfx", "identity", "get-principal"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return ""
+
+
 # =============================================================================
 # Swarm Commands
 # =============================================================================
@@ -435,9 +452,12 @@ def ask_question(
         # Use streaming endpoint for real-time feedback
         try:
             url = f"{resolved_api_url}/api/ask"
+            # Get user's dfx principal for conversation tracking
+            user_principal = get_current_user_principal()
             payload = {
                 "question": question,
-                "user_principal": agent_id or "",
+                "user_principal": user_principal,
+                "agent_id": agent_id,  # Agent identity for memory separation
                 "realm_principal": realm_principal or "",
                 "persona": persona or "",
                 "agent_name": display_name or "",

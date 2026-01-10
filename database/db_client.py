@@ -28,18 +28,19 @@ class DatabaseClient:
     
     def store_conversation(self, user_principal: str, realm_principal: str, 
                           question: str, response: str, prompt_context: str = None,
-                          metadata: Dict = None, persona_name: str = 'ashoka') -> int:
+                          metadata: Dict = None, persona_name: str = 'ashoka',
+                          agent_id: str = None) -> int:
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute("""
-                    INSERT INTO conversations (user_principal, realm_principal, question, response, persona_name, prompt_context, metadata)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO conversations (user_principal, agent_id, realm_principal, question, response, persona_name, prompt_context, metadata)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
-                """, (user_principal, realm_principal, question, response, persona_name, prompt_context, json.dumps(metadata) if metadata else None))
+                """, (user_principal, agent_id, realm_principal, question, response, persona_name, prompt_context, json.dumps(metadata) if metadata else None))
                 
                 conversation_id = cursor.fetchone()[0]
                 self.connection.commit()
-                logger.info(f"Stored conversation with ID: {conversation_id} using persona: {persona_name}")
+                logger.info(f"Stored conversation with ID: {conversation_id} for user: {user_principal[:20]}... agent: {agent_id}")
                 return conversation_id
         except Exception as e:
             logger.error(f"Failed to store conversation: {e}")
@@ -81,22 +82,32 @@ class DatabaseClient:
             logger.error(f"Failed to get conversations by user: {e}")
             return []
     
-    def get_conversation_history(self, user_principal: str, realm_principal: str, persona_name: str = None) -> List[Dict]:
-        """Get conversation history for a specific user+realm pair, optionally filtered by persona"""
+    def get_conversation_history(self, user_principal: str, realm_principal: str, persona_name: str = None, agent_id: str = None) -> List[Dict]:
+        """Get conversation history for a specific user+agent pair, optionally filtered by realm and persona"""
         try:
             with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                # Build query based on provided filters
+                conditions = ["user_principal = %s"]
+                params = [user_principal]
+                
+                if agent_id:
+                    conditions.append("agent_id = %s")
+                    params.append(agent_id)
+                
+                if realm_principal:
+                    conditions.append("realm_principal = %s")
+                    params.append(realm_principal)
+                
                 if persona_name:
-                    cursor.execute("""
-                        SELECT question, response, persona_name FROM conversations 
-                        WHERE user_principal = %s AND realm_principal = %s AND persona_name = %s
-                        ORDER BY created_at ASC
-                    """, (user_principal, realm_principal, persona_name))
-                else:
-                    cursor.execute("""
-                        SELECT question, response, persona_name FROM conversations 
-                        WHERE user_principal = %s AND realm_principal = %s 
-                        ORDER BY created_at ASC
-                    """, (user_principal, realm_principal))
+                    conditions.append("persona_name = %s")
+                    params.append(persona_name)
+                
+                query = f"""
+                    SELECT question, response, persona_name FROM conversations 
+                    WHERE {' AND '.join(conditions)}
+                    ORDER BY created_at ASC
+                """
+                cursor.execute(query, params)
                 
                 return [dict(row) for row in cursor.fetchall()]
         except Exception as e:

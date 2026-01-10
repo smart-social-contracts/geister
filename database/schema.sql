@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS conversations (
     id SERIAL PRIMARY KEY,
     user_principal TEXT NOT NULL,
+    agent_id TEXT,                        -- Agent identity (e.g., swarm_agent_001)
     realm_principal TEXT NOT NULL,
     question TEXT NOT NULL,
     response TEXT NOT NULL,
@@ -13,6 +14,7 @@ CREATE TABLE IF NOT EXISTS conversations (
 -- Indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_conversations_persona_name ON conversations(persona_name);
 CREATE INDEX IF NOT EXISTS idx_conversations_user_realm_persona ON conversations(user_principal, realm_principal, persona_name);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_agent ON conversations(user_principal, agent_id);
 
 GRANT ALL PRIVILEGES ON TABLE conversations TO geister_user;
 GRANT USAGE, SELECT ON SEQUENCE conversations_id_seq TO geister_user;

@@ -229,7 +229,7 @@ def build_user_context(user_principal, realm_principal):
         log(f"Error building user context: {e}")
         return f"\n=== USER CONTEXT ===\nUser: {user_principal[:8]}...\nError loading user history\n\n"
 
-def build_prompt(user_principal, realm_principal, question, realm_status=None, persona_name=None, agent_name=None, agent_background=None):
+def build_prompt(user_principal, realm_principal, question, realm_status=None, persona_name=None, agent_name=None, agent_background=None, agent_id=None):
     """Build complete prompt with persona + structured context + history + question"""
     # Get persona content using PersonaManager
     actual_persona_name, persona_content = persona_manager.get_persona_or_default(persona_name)
@@ -267,10 +267,10 @@ def build_prompt(user_principal, realm_principal, question, realm_status=None, p
     # Build user context
     user_context = build_user_context(user_principal, realm_principal)
     
-    # Get conversation history for context
+    # Get conversation history for context (filtered by user + agent)
     history_text = ""
     try:
-        history = db_client.get_conversation_history(user_principal, realm_principal)
+        history = db_client.get_conversation_history(user_principal, realm_principal, agent_id=agent_id)
         # Only include last 3 exchanges to keep context manageable
         recent_history = history[-3:] if len(history) > 3 else history
         for msg in recent_history:
@@ -290,8 +290,8 @@ def build_prompt(user_principal, realm_principal, question, realm_status=None, p
     
     return prompt
 
-def save_to_conversation(user_principal, realm_principal, question, answer, prompt=None, persona_name=None):
-    """Save Q&A to conversation history with persona information"""
+def save_to_conversation(user_principal, realm_principal, question, answer, prompt=None, persona_name=None, agent_id=None):
+    """Save Q&A to conversation history with persona and agent information"""
     try:
         db_client.store_conversation(
             user_principal, 
@@ -299,7 +299,8 @@ def save_to_conversation(user_principal, realm_principal, question, answer, prom
             question, 
             answer, 
             prompt, 
-            persona_name=persona_name or persona_manager.default_persona
+            persona_name=persona_name or persona_manager.default_persona,
+            agent_id=agent_id
         )
     except Exception as e:
         log(f"Error: Could not save conversation to database: {e}")
@@ -385,6 +386,7 @@ def ask():
     """Main endpoint for asking questions with persona support"""
     data = request.json
     user_principal = data.get('user_principal') or ""
+    agent_id = data.get('agent_id')  # Agent identity (e.g., swarm_agent_001)
     realm_principal = data.get('realm_principal') or ""
     question = data.get('question')
     persona_name = data.get('persona')  # Optional persona name
@@ -400,7 +402,7 @@ def ask():
     actual_persona_name, _ = persona_manager.get_persona_or_default(persona_name)
     
     # Build complete prompt with persona and realm context (realm_status fetched by LLM tool if needed)
-    prompt = build_prompt(user_principal, realm_principal, question, None, persona_name, agent_name, agent_background)
+    prompt = build_prompt(user_principal, realm_principal, question, None, persona_name, agent_name, agent_background, agent_id)
     
     # Log the complete prompt for debugging
     log("\n" + "="*80)
@@ -419,7 +421,7 @@ def ask():
     # Send to Ollama using chat API with tools
     try:
         if stream:
-            return Response(stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, actual_persona_name, network, realm_folder), 
+            return Response(stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, actual_persona_name, network, realm_folder, agent_id), 
                           mimetype='text/plain')
         else:
             # Build messages for chat API
@@ -482,8 +484,8 @@ def ask():
             
             log(f"Final answer: {answer}")
             
-            # Save to conversation history with persona info
-            save_to_conversation(user_principal, realm_principal, question, answer, prompt, actual_persona_name)
+            # Save to conversation history with persona and agent info
+            save_to_conversation(user_principal, realm_principal, question, answer, prompt, actual_persona_name, agent_id)
             
             return jsonify({
                 "success": True,
@@ -506,7 +508,7 @@ def ask_with_tools():
     return ask()
 
 
-def stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, persona_name, network="staging", realm_folder="."):
+def stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, persona_name, network="staging", realm_folder=".", agent_id=None):
     """Generator function for streaming responses with tool calling support.
     
     First checks if tools are needed (non-streaming), executes them if so,
@@ -571,7 +573,7 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
                         yield chunk
                     
                     if data.get('done', False):
-                        save_to_conversation(user_principal, realm_principal, question, full_answer, prompt, persona_name)
+                        save_to_conversation(user_principal, realm_principal, question, full_answer, prompt, persona_name, agent_id)
                         break
         else:
             # No tool calls - stream directly using chat API
@@ -581,7 +583,7 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
             # If we already have content from the first call, yield it
             if full_answer:
                 yield full_answer
-                save_to_conversation(user_principal, realm_principal, question, full_answer, prompt, persona_name)
+                save_to_conversation(user_principal, realm_principal, question, full_answer, prompt, persona_name, agent_id)
             else:
                 # Stream a new response
                 stream_response = requests.post(f"{ollama_url}/api/chat", json={
@@ -599,7 +601,7 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
                             yield chunk
                         
                         if data.get('done', False):
-                            save_to_conversation(user_principal, realm_principal, question, full_answer, prompt, persona_name)
+                            save_to_conversation(user_principal, realm_principal, question, full_answer, prompt, persona_name, agent_id)
                             break
                             
     except Exception as e:
