@@ -170,6 +170,13 @@ def resolve_agent_id(agent_ref: str) -> str:
 @agent_app.command("ls")
 def agent_ls():
     """List all agents with their profiles."""
+    mode = get_current_mode()
+    
+    if mode == "remote":
+        console.print("\n[dim]In remote mode - agent data is managed on the server.[/dim]")
+        console.print("[dim]Use 'geister mode local' to manage agents locally.[/dim]\n")
+        return
+    
     try:
         from agent_memory import list_all_agents
         from agent_swarm import cmd_list
@@ -201,7 +208,14 @@ def agent_generate(
     start: int = typer.Option(1, "--start", "-s", help="Starting index"),
     persona: str = typer.Option("compliant", "--persona", "-p", help="Persona type (compliant, exploiter, watchful)"),
 ):
-    """Generate agent identities (dfx identities for the swarm)."""
+    """Generate agent identities (dfx identities for the swarm). Requires local mode."""
+    mode = get_current_mode()
+    
+    if mode == "remote":
+        console.print("[red]Error: Agent generation requires local mode.[/red]")
+        console.print("[dim]Use 'geister mode local' to switch to local mode.[/dim]")
+        raise typer.Exit(1)
+    
     from agent_swarm import cmd_generate
     cmd_generate(count, start, persona=persona)
 
@@ -212,7 +226,14 @@ def agent_rm(
     all_agents: bool = typer.Option(False, "--all", "-a", help="Remove all agents"),
     confirm: bool = typer.Option(False, "--confirm", "-y", help="Skip confirmation"),
 ):
-    """Remove agent identity and data."""
+    """Remove agent identity and data. Requires local mode."""
+    mode = get_current_mode()
+    
+    if mode == "remote":
+        console.print("[red]Error: Agent removal requires local mode.[/red]")
+        console.print("[dim]Use 'geister mode local' to switch to local mode.[/dim]")
+        raise typer.Exit(1)
+    
     if all_agents:
         if not confirm:
             console.print("[yellow]This will delete ALL agent identities.[/yellow]")
