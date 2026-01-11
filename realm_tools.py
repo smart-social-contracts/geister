@@ -342,6 +342,56 @@ def get_vault_status(network: str = "staging", realm_folder: str = ".") -> str:
 
 
 # =============================================================================
+# ICW Token Tools (Internet Computer Wallet)
+# =============================================================================
+
+def icw_check_balance(token: str = "ckbtc", principal: Optional[str] = None, network: str = "staging", realm_folder: str = ".") -> str:
+    """Check token balance using icw CLI."""
+    cmd = ["icw", "--token", token, "balance"]
+    if principal:
+        cmd.extend(["--principal", principal])
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=_get_env())
+        if result.returncode == 0:
+            return json.dumps({"balance": result.stdout.strip(), "token": token})
+        else:
+            return json.dumps({"error": result.stderr.strip() or "Failed to get balance"})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+def icw_transfer_tokens(recipient: str, amount: str, token: str = "ckbtc", memo: Optional[str] = None, subaccount: Optional[str] = None, network: str = "staging", realm_folder: str = ".") -> str:
+    """Transfer tokens to a recipient using icw CLI."""
+    cmd = ["icw", "--token", token, "transfer", recipient, amount]
+    if memo:
+        cmd.extend(["--memo", memo])
+    if subaccount:
+        cmd.extend(["--subaccount", subaccount])
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=_get_env())
+        if result.returncode == 0:
+            return json.dumps({"success": True, "message": result.stdout.strip(), "token": token, "amount": amount, "recipient": recipient})
+        else:
+            return json.dumps({"error": result.stderr.strip() or "Transfer failed"})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+def icw_get_address(network: str = "staging", realm_folder: str = ".") -> str:
+    """Get wallet address (principal) for receiving tokens."""
+    try:
+        result = subprocess.run(["icw", "id"], capture_output=True, text=True, timeout=10, env=_get_env())
+        if result.returncode == 0:
+            return json.dumps({"address": result.stdout.strip()})
+        else:
+            return json.dumps({"error": result.stderr.strip() or "Failed to get address"})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+# =============================================================================
 # Tool Definitions for Ollama (OpenAI-compatible format)
 # =============================================================================
 
@@ -555,6 +605,73 @@ REALM_TOOLS = [
             "description": "Get vault status and statistics including balances and canister configuration.",
             "parameters": {"type": "object", "properties": {}, "required": []}
         }
+    },
+    # ICW Token Tools
+    {
+        "type": "function",
+        "function": {
+            "name": "icw_check_balance",
+            "description": "Check token balance for yourself or another principal. Supports ckBTC, ckETH, ICP, ckUSDC, ckUSDT, and REALMS tokens.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "token": {
+                        "type": "string",
+                        "description": "Token to check balance for",
+                        "enum": ["ckbtc", "cketh", "icp", "ckusdc", "ckusdt", "realms"],
+                        "default": "ckbtc"
+                    },
+                    "principal": {
+                        "type": "string",
+                        "description": "Principal ID to check balance for (optional, defaults to your own)"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "icw_transfer_tokens",
+            "description": "Transfer tokens to another principal. Supports ckBTC, ckETH, ICP, ckUSDC, ckUSDT, and REALMS tokens.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "recipient": {
+                        "type": "string",
+                        "description": "Principal ID of the recipient"
+                    },
+                    "amount": {
+                        "type": "string",
+                        "description": "Amount to transfer (e.g., '0.001' for 0.001 ckBTC)"
+                    },
+                    "token": {
+                        "type": "string",
+                        "description": "Token to transfer",
+                        "enum": ["ckbtc", "cketh", "icp", "ckusdc", "ckusdt", "realms"],
+                        "default": "ckbtc"
+                    },
+                    "memo": {
+                        "type": "string",
+                        "description": "Optional memo/tag for the transaction (max 32 bytes)"
+                    },
+                    "subaccount": {
+                        "type": "string",
+                        "description": "Recipient subaccount hex (for invoice payments to vault)"
+                    }
+                },
+                "required": ["recipient", "amount"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "icw_get_address",
+            "description": "Get your wallet address (principal ID) for receiving tokens.",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
     }
 ]
 
@@ -577,6 +694,10 @@ TOOL_FUNCTIONS = {
     "get_balance": get_balance,
     "get_transactions": get_transactions,
     "get_vault_status": get_vault_status,
+    # ICW Token Tools
+    "icw_check_balance": icw_check_balance,
+    "icw_transfer_tokens": icw_transfer_tokens,
+    "icw_get_address": icw_get_address,
 }
 
 
