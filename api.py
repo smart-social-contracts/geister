@@ -468,7 +468,7 @@ def ask():
                     log(f"Executing tool: {tool_name} with args: {tool_args}")
                     
                     # Execute the tool
-                    tool_result = execute_tool(tool_name, tool_args, network=network, realm_folder=realm_folder)
+                    tool_result = execute_tool(tool_name, tool_args, network=network, realm_folder=realm_folder, realm_principal=realm_principal)
                     
                     log(f"Tool result: {tool_result[:500]}..." if len(tool_result) > 500 else f"Tool result: {tool_result}")
                     
@@ -555,7 +555,7 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
                 log(f"Executing tool: {tool_name} with args: {tool_args}")
                 
                 # Execute the tool
-                tool_result = execute_tool(tool_name, tool_args, network=network, realm_folder=realm_folder)
+                tool_result = execute_tool(tool_name, tool_args, network=network, realm_folder=realm_folder, realm_principal=realm_principal)
                 
                 log(f"Tool result: {tool_result[:500]}..." if len(tool_result) > 500 else f"Tool result: {tool_result}")
                 

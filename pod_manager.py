@@ -70,11 +70,18 @@ class PodManager:
         config.setdefault('IMAGE_NAME_BASE', 'docker.io/smartsocialcontracts/geister')
         config.setdefault('INACTIVITY_TIMEOUT_SECONDS', '3600')
         
+        # Override with environment variables if set
+        for key in ['NETWORK_VOLUME_ID', 'TEMPLATE_ID', 'CONTAINER_DISK', 'IMAGE_NAME_BASE', 
+                    'INACTIVITY_TIMEOUT_SECONDS', 'MAX_GPU_PRICE', 'MIN_GPU_PRICE', 'GPU_COUNT']:
+            env_value = os.getenv(key)
+            if env_value:
+                config[key] = env_value
+        
         # Validate mandatory configuration
         if 'NETWORK_VOLUME_ID' not in config:
             raise ValueError(
-                "NETWORK_VOLUME_ID is required but not found in env file. "
-                "Please add NETWORK_VOLUME_ID=<your_volume_id> to the env file."
+                "NETWORK_VOLUME_ID is required but not found in env file or environment. "
+                "Set NETWORK_VOLUME_ID environment variable or add it to the env file."
             )
         
         return config

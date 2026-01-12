@@ -31,24 +31,29 @@ def _run_dfx_call(
     args: str = "()",
     network: str = "staging",
     realm_folder: str = ".",
-    timeout: int = 60
+    timeout: int = 60,
+    realm_principal: str = ""
 ) -> str:
     """
     Run a dfx canister call with JSON output.
     
     Args:
-        canister: Canister name (e.g., "realm_backend")
+        canister: Canister name (e.g., "realm_backend") - used if realm_principal not provided
         method: Method to call
         args: Candid arguments string
         network: Network to use
         realm_folder: Working directory with dfx.json
         timeout: Command timeout in seconds
+        realm_principal: Canister ID to use directly (overrides canister name)
     
     Returns:
         JSON string result or error message
     """
+    # Use realm_principal (canister ID) if provided, otherwise use canister name
+    target_canister = realm_principal if realm_principal else canister
+    
     cmd = [
-        "dfx", "canister", "call", canister, method, args,
+        "dfx", "canister", "call", target_canister, method, args,
         "--network", network,
         "--output", "json"
     ]
@@ -154,47 +159,51 @@ def _run_realms_cli(
 # Citizen Tools
 # =============================================================================
 
-def join_realm(profile: str = "member", network: str = "staging", realm_folder: str = ".") -> str:
+def join_realm(profile: str = "member", network: str = "staging", realm_folder: str = ".", realm_principal: str = "") -> str:
     """Join a realm as a citizen with a specific profile."""
     return _run_dfx_call(
         canister="realm_backend",
         method="join_realm",
         args=f'("{profile}")',
         network=network,
-        realm_folder=realm_folder
+        realm_folder=realm_folder,
+        realm_principal=realm_principal
     )
 
 
-def set_profile_picture(profile_picture_url: str, network: str = "staging", realm_folder: str = ".") -> str:
+def set_profile_picture(profile_picture_url: str, network: str = "staging", realm_folder: str = ".", realm_principal: str = "") -> str:
     """Set your profile picture in the realm."""
     return _run_dfx_call(
         canister="realm_backend",
         method="update_my_profile_picture",
         args=f'("{profile_picture_url}")',
         network=network,
-        realm_folder=realm_folder
+        realm_folder=realm_folder,
+        realm_principal=realm_principal
     )
 
 
-def get_my_status(network: str = "staging", realm_folder: str = ".") -> str:
+def get_my_status(network: str = "staging", realm_folder: str = ".", realm_principal: str = "") -> str:
     """Get your current user status in the realm."""
     return _run_dfx_call(
         canister="realm_backend",
         method="get_my_user_status",
         args="()",
         network=network,
-        realm_folder=realm_folder
+        realm_folder=realm_folder,
+        realm_principal=realm_principal
     )
 
 
-def get_my_principal(network: str = "staging", realm_folder: str = ".") -> str:
+def get_my_principal(network: str = "staging", realm_folder: str = ".", realm_principal: str = "") -> str:
     """Get your principal ID."""
     return _run_dfx_call(
         canister="realm_backend",
         method="get_my_principal",
         args="()",
         network=network,
-        realm_folder=realm_folder
+        realm_folder=realm_folder,
+        realm_principal=realm_principal
     )
 
 
@@ -202,14 +211,15 @@ def get_my_principal(network: str = "staging", realm_folder: str = ".") -> str:
 # Realm Status Tools
 # =============================================================================
 
-def realm_status(network: str = "staging", realm_folder: str = ".") -> str:
+def realm_status(network: str = "staging", realm_folder: str = ".", realm_principal: str = "") -> str:
     """Get the current status of the realm (users, proposals, votes, extensions)."""
     return _run_dfx_call(
         canister="realm_backend",
         method="status",
         args="()",
         network=network,
-        realm_folder=realm_folder
+        realm_folder=realm_folder,
+        realm_principal=realm_principal
     )
 
 
@@ -701,7 +711,7 @@ TOOL_FUNCTIONS = {
 }
 
 
-def execute_tool(tool_name: str, arguments: dict, network: str = "staging", realm_folder: str = ".") -> str:
+def execute_tool(tool_name: str, arguments: dict, network: str = "staging", realm_folder: str = ".", realm_principal: str = "") -> str:
     """Execute a tool by name with given arguments."""
     if tool_name not in TOOL_FUNCTIONS:
         return json.dumps({"error": f"Unknown tool '{tool_name}'"})
@@ -711,15 +721,20 @@ def execute_tool(tool_name: str, arguments: dict, network: str = "staging", real
     import inspect
     valid_params = set(inspect.signature(func).parameters.keys())
     
-    # Start with network and realm_folder defaults
+    # Start with network, realm_folder, and realm_principal defaults
     filtered_args = {
         "network": network,
-        "realm_folder": realm_folder
+        "realm_folder": realm_folder,
+        "realm_principal": realm_principal
     }
     
     # Add any valid arguments from the LLM
     for key, value in arguments.items():
         if key in valid_params:
             filtered_args[key] = value
+    
+    # Only pass realm_principal if the function accepts it
+    if "realm_principal" not in valid_params:
+        del filtered_args["realm_principal"]
     
     return func(**filtered_args)
