@@ -753,6 +753,22 @@ def health():
         "seconds_since_last_activity": int(time.time() - last_activity_time) if INACTIVITY_TIMEOUT_SECONDS > 0 else None
     })
 
+@app.route('/api/agents', methods=['GET'])
+def list_agents():
+    """List all agents with their profiles"""
+    update_activity()
+    
+    try:
+        from agent_memory import list_all_agents
+        agents = list_all_agents()
+        return jsonify({
+            "success": True,
+            "agents": agents
+        })
+    except Exception as e:
+        log(f"Error listing agents: {traceback.format_exc()}")
+        return jsonify({"error": str(e), "agents": []}), 500
+
 @app.route('/api/personas', methods=['GET'])
 def list_personas():
     """List all available personas"""

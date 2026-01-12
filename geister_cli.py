@@ -29,7 +29,8 @@ Usage:
 
 import os
 import sys
-from typing import Optional
+import json
+from typing import Optional, Tuple
 
 import typer
 from rich.console import Console
@@ -170,11 +171,33 @@ def resolve_agent_id(agent_ref: str) -> str:
 @agent_app.command("ls")
 def agent_ls():
     """List all agents with their profiles."""
+    import requests
+    
     mode = get_current_mode()
     
     if mode == "remote":
-        console.print("\n[dim]In remote mode - agent data is managed on the server.[/dim]")
-        console.print("[dim]Use 'geister mode local' to manage agents locally.[/dim]\n")
+        # Fetch agents from remote server
+        try:
+            api_url = get_api_url()
+            response = requests.get(f"{api_url}/api/agents", timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            agents = data.get("agents", [])
+            
+            if agents:
+                console.print("\n[bold]Remote Agents:[/bold]")
+                console.print("=" * 60)
+                for agent in agents:
+                    name = agent.get('display_name') or agent.get('agent_id', 'unknown')
+                    persona = agent.get('persona') or 'default'
+                    sessions = agent.get('total_sessions', 0)
+                    console.print(f"  🤖 [bold]{name}[/bold] ({agent.get('agent_id', '')})")
+                    console.print(f"     Persona: {persona} | Sessions: {sessions}")
+                console.print()
+            else:
+                console.print("\n[dim]No agents found on server.[/dim]\n")
+        except requests.exceptions.RequestException as e:
+            console.print(f"[yellow]Could not fetch agents from server: {e}[/yellow]")
         return
     
     try:
@@ -275,6 +298,7 @@ def agent_ask(
     name: Optional[str] = typer.Option(None, "--name", "-n", help="Display name for the agent"),
     api_url: Optional[str] = typer.Option(None, "--api-url", "-u", help="Geister API URL"),
     ollama_url: Optional[str] = typer.Option(None, "--ollama-url", help="Ollama URL"),
+    json_output: bool = typer.Option(False, "--json", help="Output structured JSON response"),
 ):
     """Ask an agent a question or start interactive chat session."""
     import requests
@@ -288,33 +312,37 @@ def agent_ask(
         resolved_api_url = f"https://{resolved_api_url}"
     resolved_ollama_url = ollama_url or os.getenv("GEISTER_OLLAMA_URL") or os.getenv("OLLAMA_HOST") or "https://geister-ollama.realmsgos.dev"
     
-    # Load agent profile
+    # Load agent profile (only in local mode - memory is managed on server in remote mode)
     memory = None
     display_name = name
     agent_background = None
-    try:
-        from agent_memory import AgentMemory
-        memory = AgentMemory(agent_id, persona=persona)
-        
-        profile = memory.get_profile()
-        if profile:
-            if not name:
-                display_name = profile.get('display_name') or agent_id
-            if not persona:
-                persona = profile.get('persona')
-            agent_background = profile.get('metadata')
-        
-        if name or not profile:
-            profile = memory.ensure_profile(display_name=name)
-            # Always get display_name from profile (may be auto-generated human name)
-            display_name = profile.get('display_name') or display_name or agent_id
-            if not agent_background:
-                agent_background = profile.get('metadata')
-    except Exception as e:
-        console.print(f"[yellow]⚠️  Could not load agent memory: {e}[/yellow]")
+    is_remote = get_current_mode() == "remote"
     
-    def send_question(q: str) -> str:
-        """Send a question to the agent and return the response."""
+    if not is_remote:
+        try:
+            from agent_memory import AgentMemory
+            memory = AgentMemory(agent_id, persona=persona)
+            
+            profile = memory.get_profile()
+            if profile:
+                if not name:
+                    display_name = profile.get('display_name') or agent_id
+                if not persona:
+                    persona = profile.get('persona')
+                agent_background = profile.get('metadata')
+            
+            if name or not profile:
+                profile = memory.ensure_profile(display_name=name)
+                # Always get display_name from profile (may be auto-generated human name)
+                display_name = profile.get('display_name') or display_name or agent_id
+                if not agent_background:
+                    agent_background = profile.get('metadata')
+        except Exception as e:
+            if not json_output:
+                console.print(f"[yellow]⚠️  Could not load agent memory: {e}[/yellow]")
+    
+    def send_question(q: str, silent: bool = False) -> Tuple[str, Optional[str]]:
+        """Send a question to the agent and return (response, error)."""
         user_principal = get_current_user_principal()
         payload = {
             "question": q,
@@ -329,22 +357,31 @@ def agent_ask(
         }
         
         full_response = ""
+        error = None
         try:
             url = f"{resolved_api_url}/api/ask"
             with requests.post(url, json=payload, stream=True, timeout=300) as response:
                 response.raise_for_status()
                 for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
                     if chunk:
-                        print(chunk, end="", flush=True)
+                        if not silent:
+                            print(chunk, end="", flush=True)
                         full_response += chunk
-            print()
+            if not silent:
+                print()
         except requests.exceptions.RequestException as e:
-            console.print(f"[red]Error: {e}[/red]")
+            error = str(e)
+            if not silent:
+                console.print(f"[red]Error: {e}[/red]")
         
-        return full_response
+        return full_response, error
     
     # Interactive mode if no question provided
     if question is None:
+        if json_output:
+            console.print("[red]Interactive mode not supported with --json[/red]")
+            raise typer.Exit(1)
+        
         console.print(f"\n[bold green]🤖 Agent Session: {display_name or agent_id}[/bold green]")
         console.print(f"[dim]Persona: {persona or 'default'} | Agent ID: {agent_id}[/dim]")
         console.print("[dim]Type 'exit' or Ctrl+C to end session[/dim]\n")
@@ -359,7 +396,7 @@ def agent_ask(
                         continue
                     
                     console.print("[bold green]Agent:[/bold green] ", end="")
-                    response = send_question(user_input)
+                    response, error = send_question(user_input)
                     
                     # Save to memory
                     if memory and response:
@@ -380,23 +417,41 @@ def agent_ask(
             console.print("\n[yellow]Session ended[/yellow]")
     else:
         # Single question mode
-        console.print(f"[dim]🤖 Agent: {display_name or agent_id} ({persona or 'default'})[/dim]")
-        console.print(f"[dim]Asking: {question}[/dim]\n")
-        console.print("[bold green]Agent:[/bold green] ", end="")
-        response = send_question(question)
-        
-        # Save to memory
-        if memory and response:
-            try:
-                memory.remember(
-                    action_type="conversation",
-                    action_summary=f"Asked: {question[:100]}...",
-                    action_details={"question": question, "answer": response},
-                    realm_principal=realm
-                )
-                console.print("[dim]💾 Saved to agent memory[/dim]")
-            except Exception as e:
-                console.print(f"[yellow]⚠️  Could not save to memory: {e}[/yellow]")
+        if json_output:
+            # JSON output mode - silent execution, structured response
+            response, error = send_question(question, silent=True)
+            
+            result = {
+                "success": error is None and bool(response),
+                "agent_id": agent_id,
+                "realm": realm or "",
+                "question": question,
+                "response": response,
+                "error": error
+            }
+            print(json.dumps(result))
+            
+            if error:
+                raise typer.Exit(1)
+        else:
+            # Normal output mode
+            console.print(f"[dim]🤖 Agent: {display_name or agent_id} ({persona or 'default'})[/dim]")
+            console.print(f"[dim]Asking: {question}[/dim]\n")
+            console.print("[bold green]Agent:[/bold green] ", end="")
+            response, error = send_question(question)
+            
+            # Save to memory
+            if memory and response:
+                try:
+                    memory.remember(
+                        action_type="conversation",
+                        action_summary=f"Asked: {question[:100]}...",
+                        action_details={"question": question, "answer": response},
+                        realm_principal=realm
+                    )
+                    console.print("[dim]💾 Saved to agent memory[/dim]")
+                except Exception as e:
+                    console.print(f"[yellow]⚠️  Could not save to memory: {e}[/yellow]")
 
 
 @agent_app.command("inspect")
