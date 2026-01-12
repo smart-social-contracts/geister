@@ -237,6 +237,19 @@ def db_get(entity_type: str, entity_id: Optional[str] = None, network: str = "st
     )
 
 
+def db_schema(network: str = "staging", realm_folder: str = ".") -> str:
+    """Get the database schema showing all entity types, fields, and relationships.
+    
+    Use this to discover what entity types are available before querying with db_get.
+    """
+    subcommand = ["db", "-f", realm_folder, "schema"]
+    return _run_realms_cli(
+        subcommand=subcommand,
+        network=network,
+        realm_folder=realm_folder
+    )
+
+
 # =============================================================================
 # Governance / Voting Tools
 # =============================================================================
@@ -471,15 +484,26 @@ REALM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "db_schema",
+            "description": "Get the database schema showing all available entity types, their fields, and relationships. Use this first to discover what entity types exist before querying with db_get.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "db_get",
-            "description": "Get entities from the realm database. Without entity_id, lists all entities of that type. With entity_id, gets a specific entity.",
+            "description": "Get entities from the realm database. Without entity_id, lists all entities of that type. With entity_id, gets a specific entity. Use db_schema first to discover available entity types.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "entity_type": {
                         "type": "string",
-                        "description": "Type of entity to query from the realm database",
-                        "enum": ["Balance", "Codex", "Dispute", "Identity", "Invoice", "Land", "License", "Mandate", "Organization", "Proposal", "Realm", "Task", "Transfer", "Treasury", "User", "UserProfile", "Vote"]
+                        "description": "Type of entity to query (e.g., User, Notification, Transfer). Use db_schema to discover available types."
                     },
                     "entity_id": {
                         "type": "string",
@@ -694,6 +718,7 @@ TOOL_FUNCTIONS = {
     "get_my_principal": get_my_principal,
     # Realm status
     "realm_status": realm_status,
+    "db_schema": db_schema,
     "db_get": db_get,
     # Governance
     "get_proposals": get_proposals,
