@@ -631,6 +631,20 @@ def pod_restart_api(
     raise typer.Exit(0 if success else 1)
 
 
+@pod_app.command("logs")
+def pod_logs(
+    pod_type: str = typer.Argument("main", help="Pod type (main or branch)"),
+    log_type: str = typer.Option("api", "--type", "-t", help="Log type: api, ollama, chromadb, or all"),
+    lines: int = typer.Option(100, "--lines", "-n", help="Number of lines to show"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+):
+    """Fetch logs from a RunPod instance for debugging agent questions/answers/tooling."""
+    from pod_manager import PodManager
+    manager = PodManager(verbose=verbose)
+    success = manager.get_pod_logs(pod_type, log_type, lines)
+    raise typer.Exit(0 if success else 1)
+
+
 # =============================================================================
 # Server Commands (require PostgreSQL)
 # =============================================================================

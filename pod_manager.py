@@ -734,6 +734,44 @@ class PodManager:
             traceback.print_exc()
             return False
     
+    def get_pod_logs(self, pod_type: str, log_type: str = "api", lines: int = 100) -> bool:
+        """Fetch logs from a pod via API for debugging agent questions/answers/tooling.
+        
+        Args:
+            pod_type: Pod type (main or branch)
+            log_type: Type of logs - 'api', 'ollama', 'chromadb', or 'all'
+            lines: Number of lines to return
+        """
+        api_url = self._get_api_url(pod_type)
+        if not api_url:
+            self._print(f"❌ No {pod_type} pod found or not running", force=True)
+            return False
+        
+        endpoint = f"{api_url}/api/logs"
+        params = {"lines": lines, "type": log_type}
+        
+        try:
+            self._print(f"📋 Fetching {log_type} logs from {pod_type} pod...")
+            response = requests.get(endpoint, params=params, timeout=30)
+            
+            if response.status_code == 404:
+                self._print(f"❌ Log file not found: {response.text}", force=True)
+                return False
+            
+            response.raise_for_status()
+            
+            # Print logs directly
+            print(response.text)
+            return True
+            
+        except requests.exceptions.RequestException as e:
+            self._print(f"❌ API request failed: {e}", force=True)
+            return False
+        except Exception as e:
+            self._print(f"❌ Error: {e}", force=True)
+            traceback.print_exc()
+            return False
+
 def main():
     parser = argparse.ArgumentParser(
         description="RunPod Manager - Manage RunPod instances using the official RunPod SDK",

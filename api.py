@@ -898,6 +898,48 @@ def get_persona_conversations(persona_name):
         log(f"Error getting conversations for persona {persona_name}: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/logs', methods=['GET'])
+def get_logs():
+    """Get API logs for debugging agent questions/answers/tooling.
+    
+    Query params:
+        lines: Number of lines to return (default 100)
+        type: Log type - 'api', 'ollama', 'all' (default 'api')
+    """
+    lines = request.args.get('lines', 100, type=int)
+    log_type = request.args.get('type', 'api')
+    
+    log_dir = Path(__file__).parent / 'logs'
+    
+    log_files = {
+        'api': log_dir / 'api.log',
+        'ollama': log_dir / 'ollama.log',
+        'chromadb': log_dir / 'chromadb.log',
+    }
+    
+    try:
+        if log_type == 'all':
+            # Combine all logs
+            all_logs = []
+            for name, path in log_files.items():
+                if path.exists():
+                    with open(path, 'r') as f:
+                        content = f.readlines()
+                        all_logs.append(f"=== {name.upper()} LOGS ===")
+                        all_logs.extend(content[-lines:])
+            return '\n'.join(all_logs), 200, {'Content-Type': 'text/plain'}
+        else:
+            log_path = log_files.get(log_type, log_files['api'])
+            if not log_path.exists():
+                return f"Log file not found: {log_path}", 404, {'Content-Type': 'text/plain'}
+            
+            with open(log_path, 'r') as f:
+                content = f.readlines()
+                return ''.join(content[-lines:]), 200, {'Content-Type': 'text/plain'}
+    except Exception as e:
+        return f"Error reading logs: {e}", 500, {'Content-Type': 'text/plain'}
+
+
 if __name__ == '__main__':
     # Start inactivity monitoring if enabled
     start_inactivity_monitor()
