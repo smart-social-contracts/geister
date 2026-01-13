@@ -146,6 +146,7 @@ def resolve_agent_id(agent_ref: str) -> str:
     Accepts either:
     - Full agent ID: "swarm_agent_001"
     - Index number: "1" or "001"
+    - Display name: "William" (looks up in database)
     
     Returns the full agent ID (e.g., "swarm_agent_001").
     """
@@ -158,6 +159,15 @@ def resolve_agent_id(agent_ref: str) -> str:
         index = int(agent_ref)
         return f"swarm_agent_{index:03d}"
     except ValueError:
+        pass
+    
+    # Try to look up by display name in database
+    try:
+        from agent_memory import get_agent_id_by_display_name
+        agent_id = get_agent_id_by_display_name(agent_ref)
+        if agent_id:
+            return agent_id
+    except Exception:
         pass
     
     # Return as-is if we can't resolve it

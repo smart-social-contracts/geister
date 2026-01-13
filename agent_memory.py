@@ -403,6 +403,31 @@ def get_agent_memory(agent_id: str, principal: str = None, persona: str = None) 
     return AgentMemory(agent_id, principal, persona)
 
 
+def get_agent_id_by_display_name(display_name: str) -> Optional[str]:
+    """Look up agent_id by display_name (case-insensitive)."""
+    conn = None
+    try:
+        conn = psycopg2.connect(
+            host=os.getenv('DB_HOST', 'localhost'),
+            database=os.getenv('DB_NAME', 'geister_db'),
+            user=os.getenv('DB_USER', 'geister_user'),
+            password=os.getenv('DB_PASS', 'geister_pass'),
+            port=os.getenv('DB_PORT', '5432')
+        )
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT agent_id FROM agent_profiles WHERE LOWER(display_name) = LOWER(%s)",
+                (display_name,)
+            )
+            result = cursor.fetchone()
+            return result[0] if result else None
+    except Exception:
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+
 def list_all_agents() -> List[Dict]:
     """List all agent profiles."""
     conn = None
