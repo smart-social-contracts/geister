@@ -440,69 +440,52 @@ def ask():
                 {"role": "user", "content": question}
             ]
             
-            # First call - may request tool use
-            log("Sending to Ollama with tools...")
-            response = requests.post(f"{ollama_url}/api/chat", json={
-                "model": ASHOKA_DEFAULT_MODEL,
-                "messages": messages,
-                "tools": REALM_TOOLS,
-                "stream": False
-            })
-            
-            result = response.json()
-            log(f"Ollama response: {json.dumps(result, indent=2)}")
-            
-            assistant_message = result.get('message', {})
-            messages.append(assistant_message)
+            # Multi-step tool execution loop
             tools_used = False
+            max_iterations = 10  # Prevent infinite loops
+            iteration = 0
+            answer = None
             
-            # Check if tool calls were requested
-            if assistant_message.get('tool_calls'):
-                tools_used = True
-                log("Tool calls requested!")
+            while iteration < max_iterations:
+                iteration += 1
+                log(f"Ollama iteration {iteration}...")
                 
-                for tool_call in assistant_message['tool_calls']:
-                    tool_name = tool_call['function']['name']
-                    tool_args = tool_call['function']['arguments']
-                    
-                    log(f"Executing tool: {tool_name} with args: {tool_args}")
-                    
-                    # Execute the tool
-                    tool_result = execute_tool(tool_name, tool_args, network=network, realm_folder=realm_folder, realm_principal=realm_principal)
-                    
-                    log(f"Tool result: {tool_result[:500]}..." if len(tool_result) > 500 else f"Tool result: {tool_result}")
-                    
-                    # Add tool result to messages
-                    messages.append({
-                        "role": "tool",
-                        "content": tool_result
-                    })
-                
-                # Second call - get final response with tool results
-                log("Sending tool results back to Ollama...")
-                final_response = requests.post(f"{ollama_url}/api/chat", json={
+                response = requests.post(f"{ollama_url}/api/chat", json={
                     "model": ASHOKA_DEFAULT_MODEL,
                     "messages": messages,
+                    "tools": REALM_TOOLS,
                     "stream": False
                 })
                 
-                final_result = final_response.json()
-                log(f"Ollama final response keys: {final_result.keys()}")
-                answer = final_result.get('message', {}).get('content', '')
+                result = response.json()
+                assistant_message = result.get('message', {})
+                messages.append(assistant_message)
                 
-                # If answer is empty, Ollama may have returned tool calls again or no content
-                if not answer:
-                    log(f"Empty answer from Ollama, full response: {json.dumps(final_result)[:500]}")
-                    # Try to get any useful response
-                    if 'message' in final_result:
-                        msg = final_result['message']
-                        if msg.get('tool_calls'):
-                            answer = "Tool execution completed successfully."
-                        elif not msg.get('content'):
-                            answer = "Action completed."
-            else:
-                # No tool calls, use direct response
-                answer = assistant_message.get('content', 'No response')
+                content = assistant_message.get('content', '')
+                tool_calls = assistant_message.get('tool_calls', [])
+                
+                if content and not tool_calls:
+                    answer = content
+                    log(f"Got final answer after {iteration} iterations")
+                    break
+                
+                if not tool_calls:
+                    answer = content or "Action completed."
+                    break
+                
+                tools_used = True
+                log(f"Tool calls requested (iteration {iteration})")
+                
+                for tool_call in tool_calls:
+                    tool_name = tool_call['function']['name']
+                    tool_args = tool_call['function']['arguments']
+                    log(f"Executing tool: {tool_name} with args: {tool_args}")
+                    tool_result = execute_tool(tool_name, tool_args, network=network, realm_folder=realm_folder, realm_principal=realm_principal)
+                    log(f"Tool result: {tool_result[:500]}..." if len(tool_result) > 500 else f"Tool result: {tool_result}")
+                    messages.append({"role": "tool", "content": tool_result})
+            
+            if answer is None:
+                answer = "Task completed after multiple tool executions."
             
             log(f"Final answer: {answer}")
             
