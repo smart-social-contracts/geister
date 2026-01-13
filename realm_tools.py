@@ -133,7 +133,8 @@ def _run_realms_cli(
     Returns:
         Command output or error message
     """
-    cmd = ["realms"] + subcommand + ["-n", network]
+    # Network flag goes after 'realms' and before subcommand args
+    cmd = ["realms", subcommand[0], "-n", network] + subcommand[1:]
     
     try:
         result = subprocess.run(
