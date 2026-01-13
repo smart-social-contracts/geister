@@ -21,7 +21,7 @@ jobs:
           python-version: '3.x'
 
       - name: Install dependencies
-        run: pip install -e .
+        run: pip install -e ".[full]"
 
       - name: Deploy pod with latest image
         run: geister pod terminate && geister pod start --deploy-new --verbose
