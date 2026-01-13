@@ -636,13 +636,34 @@ def pod_logs(
     pod_type: str = typer.Argument("main", help="Pod type (main or branch)"),
     log_type: str = typer.Option("api", "--type", "-t", help="Log type: api, ollama, chromadb, or all"),
     lines: int = typer.Option(100, "--lines", "-n", help="Number of lines to show"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    api_url: Optional[str] = typer.Option(None, "--api-url", "-u", help="Geister API URL (uses default if not set)"),
 ):
     """Fetch logs from a RunPod instance for debugging agent questions/answers/tooling."""
-    from pod_manager import PodManager
-    manager = PodManager(verbose=verbose)
-    success = manager.get_pod_logs(pod_type, log_type, lines)
-    raise typer.Exit(0 if success else 1)
+    import requests
+    
+    # Use provided URL or get from config
+    resolved_api_url = api_url or get_api_url()
+    if not resolved_api_url.startswith("http"):
+        resolved_api_url = f"https://{resolved_api_url}"
+    
+    endpoint = f"{resolved_api_url}/api/logs"
+    params = {"lines": lines, "type": log_type}
+    
+    try:
+        console.print(f"[dim]📋 Fetching {log_type} logs from {resolved_api_url}...[/dim]")
+        response = requests.get(endpoint, params=params, timeout=30)
+        
+        if response.status_code == 404:
+            console.print(f"[red]❌ Log file not found: {response.text}[/red]")
+            raise typer.Exit(1)
+        
+        response.raise_for_status()
+        print(response.text, flush=True)
+        raise typer.Exit(0)
+        
+    except requests.exceptions.RequestException as e:
+        console.print(f"[red]❌ API request failed: {e}[/red]")
+        raise typer.Exit(1)
 
 
 # =============================================================================
