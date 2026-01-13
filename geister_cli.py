@@ -380,6 +380,10 @@ def agent_ask(
             error = str(e)
             if not silent:
                 console.print(f"[red]Error: {e}[/red]")
+        except Exception as e:
+            error = str(e)
+            if not silent:
+                console.print(f"[red]Error: {e}[/red]")
         
         return full_response, error
     

@@ -487,7 +487,19 @@ def ask():
                 })
                 
                 final_result = final_response.json()
-                answer = final_result.get('message', {}).get('content', 'No response')
+                log(f"Ollama final response keys: {final_result.keys()}")
+                answer = final_result.get('message', {}).get('content', '')
+                
+                # If answer is empty, Ollama may have returned tool calls again or no content
+                if not answer:
+                    log(f"Empty answer from Ollama, full response: {json.dumps(final_result)[:500]}")
+                    # Try to get any useful response
+                    if 'message' in final_result:
+                        msg = final_result['message']
+                        if msg.get('tool_calls'):
+                            answer = "Tool execution completed successfully."
+                        elif not msg.get('content'):
+                            answer = "Action completed."
             else:
                 # No tool calls, use direct response
                 answer = assistant_message.get('content', 'No response')
