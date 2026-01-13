@@ -32,7 +32,7 @@ jobs:
       - name: Test API connectivity
         run: |
           echo "🔍 Testing API connectivity..."
-          geister status --check
+          geister status
 
       - name: Test basic ask functionality
         run: |
