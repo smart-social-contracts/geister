@@ -21,7 +21,8 @@ from realm_tools import REALM_TOOLS, execute_tool
 
 def log(message):
     """Helper function to print with flush=True for better logging"""
-    print(message, flush=True)
+    import sys
+    print(message, file=sys.stderr, flush=True)
 
 
 app = Flask(__name__)
@@ -424,6 +425,9 @@ def ask():
     # Check if streaming is requested
     stream = data.get('stream', False)
     
+    # Verbosity level: 0=Q&A only, 1=debug without stream lines, 2=full debug
+    verbosity = data.get('verbosity', 0)
+    
     # Tool calling parameters
     realm_folder = data.get('realm_folder', '.')
     network = data.get('network', 'staging')
@@ -431,7 +435,7 @@ def ask():
     # Send to Ollama using chat API with tools
     try:
         if stream:
-            return Response(stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, actual_persona_name, network, realm_folder, agent_id), 
+            return Response(stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, actual_persona_name, network, realm_folder, agent_id, verbosity), 
                           mimetype='text/plain')
         else:
             # Build messages for chat API
@@ -513,12 +517,28 @@ def ask_with_tools():
     return ask()
 
 
-def stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, persona_name, network="staging", realm_folder=".", agent_id=None):
+def stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, persona_name, network="staging", realm_folder=".", agent_id=None, verbosity=0):
     """Generator function for streaming responses with tool calling support.
     
     First checks if tools are needed (non-streaming), executes them if so,
     then streams the final response.
+    
+    Verbosity levels:
+    - 0: Q&A only (no debug output)
+    - 1: Debug info without stream lines (timestamps included)
+    - 2: Full debug including stream lines (timestamps included)
     """
+    from datetime import datetime
+    
+    def debug(msg, level=1, is_stream_line=False):
+        """Yield debug message if verbosity allows. Returns the message or empty string."""
+        if verbosity >= level:
+            if is_stream_line and verbosity < 2:
+                return ""
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            return f"\n__DEBUG__ [{ts}] {msg}\n"
+        return ""
+    
     try:
         # Build messages for chat API
         messages = [
@@ -528,6 +548,10 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
         
         # First call - check if tools are needed (non-streaming)
         log("Checking for tool calls...")
+        dbg = debug("Checking for tool calls...")
+        if dbg:
+            yield dbg
+            
         response = requests.post(f"{ollama_url}/api/chat", json={
             "model": ASHOKA_DEFAULT_MODEL,
             "messages": messages,
@@ -542,17 +566,26 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
         # Check if tool calls were requested
         if assistant_message.get('tool_calls'):
             log("Tool calls requested in streaming mode!")
+            dbg = debug("Tool calls requested in streaming mode!")
+            if dbg:
+                yield dbg
             
             for tool_call in assistant_message['tool_calls']:
                 tool_name = tool_call['function']['name']
                 tool_args = tool_call['function']['arguments']
                 
                 log(f"Executing tool: {tool_name} with args: {tool_args}")
+                dbg = debug(f"Executing tool: {tool_name} with args: {tool_args}")
+                if dbg:
+                    yield dbg
                 
                 # Execute the tool
                 tool_result = execute_tool(tool_name, tool_args, network=network, realm_folder=realm_folder, realm_principal=realm_principal)
                 
                 log(f"Tool result: {tool_result[:500]}..." if len(tool_result) > 500 else f"Tool result: {tool_result}")
+                dbg = debug(f"Tool result: {tool_result[:500]}..." if len(tool_result) > 500 else f"Tool result: {tool_result}")
+                if dbg:
+                    yield dbg
                 
                 # Add tool result to messages
                 messages.append({
@@ -562,27 +595,61 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
             
             # Stream the final response with tool results
             log("Streaming final response with tool results...")
+            log(f"Messages being sent: {len(messages)} messages")
+            dbg = debug(f"Streaming final response with tool results... ({len(messages)} messages)")
+            if dbg:
+                yield dbg
+                
             final_response = requests.post(f"{ollama_url}/api/chat", json={
                 "model": ASHOKA_DEFAULT_MODEL,
                 "messages": messages,
                 "stream": True
             }, stream=True)
             
+            log(f"Final response status: {final_response.status_code}")
+            dbg = debug(f"Final response status: {final_response.status_code}")
+            if dbg:
+                yield dbg
+                
             full_answer = ""
+            line_count = 0
             for line in final_response.iter_lines():
+                line_count += 1
                 if line:
+                    log(f"Stream line {line_count}: {line[:200]}")
+                    dbg = debug(f"Stream line {line_count}: {line[:200].decode('utf-8') if isinstance(line, bytes) else line[:200]}", is_stream_line=True)
+                    if dbg:
+                        yield dbg
+                        
                     data = json.loads(line.decode('utf-8'))
+                    if 'error' in data:
+                        log(f"Ollama error: {data['error']}")
+                        yield f"Error: {data['error']}"
+                        break
                     if 'message' in data and 'content' in data['message']:
                         chunk = data['message']['content']
                         full_answer += chunk
                         yield chunk
                     
                     if data.get('done', False):
+                        log(f"Stream done. Full answer length: {len(full_answer)}")
+                        dbg = debug(f"Stream done. Full answer length: {len(full_answer)}")
+                        if dbg:
+                            yield dbg
                         save_to_conversation(user_principal, realm_principal, question, full_answer, prompt, persona_name, agent_id)
                         break
+            log(f"Stream ended after {line_count} lines, answer: {full_answer[:100] if full_answer else '(empty)'}")
+            dbg = debug(f"Stream ended after {line_count} lines")
+            if dbg:
+                yield dbg
         else:
             # No tool calls - stream directly using chat API
             log("No tools needed, streaming response...")
+            log(f"Assistant message content: '{assistant_message.get('content', '')[:200] if assistant_message.get('content') else '(empty)'}'")
+            dbg = debug("No tools needed, streaming response...")
+            if dbg:
+                yield dbg
+                
             full_answer = assistant_message.get('content', '')
             
             # If we already have content from the first call, yield it
@@ -591,14 +658,22 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
                 save_to_conversation(user_principal, realm_principal, question, full_answer, prompt, persona_name, agent_id)
             else:
                 # Stream a new response
+                log(f"Streaming new response, messages count: {len(messages[:-1])}")
                 stream_response = requests.post(f"{ollama_url}/api/chat", json={
                     "model": ASHOKA_DEFAULT_MODEL,
                     "messages": messages[:-1],  # Remove empty assistant message
                     "stream": True
                 }, stream=True)
+                log(f"Stream response status: {stream_response.status_code}")
                 
+                line_count = 0
                 for line in stream_response.iter_lines():
+                    line_count += 1
                     if line:
+                        dbg = debug(f"Stream line {line_count}: {line[:200].decode('utf-8') if isinstance(line, bytes) else line[:200]}", is_stream_line=True)
+                        if dbg:
+                            yield dbg
+                            
                         data = json.loads(line.decode('utf-8'))
                         if 'message' in data and 'content' in data['message']:
                             chunk = data['message']['content']
@@ -606,6 +681,9 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
                             yield chunk
                         
                         if data.get('done', False):
+                            dbg = debug(f"Stream done. Full answer length: {len(full_answer)}")
+                            if dbg:
+                                yield dbg
                             save_to_conversation(user_principal, realm_principal, question, full_answer, prompt, persona_name, agent_id)
                             break
                             

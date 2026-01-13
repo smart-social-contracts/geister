@@ -309,6 +309,7 @@ def agent_ask(
     api_url: Optional[str] = typer.Option(None, "--api-url", "-u", help="Geister API URL"),
     ollama_url: Optional[str] = typer.Option(None, "--ollama-url", help="Ollama URL"),
     json_output: bool = typer.Option(False, "--json", help="Output structured JSON response"),
+    verbosity: int = typer.Option(0, "--verbosity-level", "-v", help="Verbosity level: 0=Q&A only, 1=debug without stream lines, 2=full debug"),
 ):
     """Ask an agent a question or start interactive chat session."""
     import requests
@@ -363,11 +364,51 @@ def agent_ask(
             "agent_name": display_name or "",
             "agent_background": agent_background,
             "ollama_url": resolved_ollama_url,
-            "stream": use_streaming
+            "stream": use_streaming,
+            "verbosity": verbosity
         }
         
         full_response = ""
         error = None
+        buffer = ""  # Buffer to handle split debug markers
+        
+        def print_chunk(text: str):
+            """Print chunk with appropriate coloring based on content."""
+            nonlocal buffer
+            # Combine with any buffered content
+            text = buffer + text
+            buffer = ""
+            
+            # Check for debug markers
+            while "__DEBUG__" in text:
+                # Split at the debug marker
+                before, rest = text.split("__DEBUG__", 1)
+                
+                # Print content before debug marker (agent response - cyan)
+                if before.strip():
+                    console.print(f"[cyan]{before}[/cyan]", end="")
+                
+                # Find the end of the debug line
+                if "\n" in rest:
+                    # Find the second newline (debug messages are wrapped in \n...\n)
+                    parts = rest.split("\n", 2)
+                    if len(parts) >= 2:
+                        debug_content = parts[1] if parts[0] == "" else parts[0]
+                        text = parts[2] if len(parts) > 2 else ""
+                        # Print debug in dark grey
+                        console.print(f"[dim bright_black]__DEBUG__ {debug_content}[/dim bright_black]")
+                    else:
+                        text = rest
+                        break
+                else:
+                    # Incomplete debug message, buffer it
+                    buffer = "__DEBUG__" + rest
+                    return
+            
+            # Print remaining content (agent response - cyan)
+            if text:
+                console.print(f"[cyan]{text}[/cyan]", end="")
+        
         try:
             url = f"{resolved_api_url}/api/ask"
             if use_streaming:
@@ -376,8 +417,22 @@ def agent_ask(
                     for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
                         if chunk:
                             if not silent:
-                                print(chunk, end="", flush=True)
-                            full_response += chunk
+                                if verbosity > 0:
+                                    print_chunk(chunk)
+                                else:
+                                    # Level 0: just print agent response in cyan
+                                    console.print(f"[cyan]{chunk}[/cyan]", end="")
+                            # Strip debug markers from stored response
+                            clean_chunk = chunk
+                            while "__DEBUG__" in clean_chunk:
+                                before, rest = clean_chunk.split("__DEBUG__", 1)
+                                full_response += before
+                                if "\n" in rest:
+                                    parts = rest.split("\n", 2)
+                                    clean_chunk = parts[2] if len(parts) > 2 else ""
+                                else:
+                                    clean_chunk = ""
+                            full_response += clean_chunk
                 if not silent:
                     print()
             else:
@@ -416,7 +471,7 @@ def agent_ask(
                     if not user_input:
                         continue
                     
-                    console.print("[bold green]Agent:[/bold green] ", end="")
+                    console.print(f"[bold cyan]{display_name or 'Agent'}:[/bold cyan] ", end="")
                     response, error = send_question(user_input)
                     
                     # Save to memory
@@ -458,7 +513,7 @@ def agent_ask(
             # Normal output mode
             console.print(f"[dim]🤖 Agent: {display_name or agent_id} ({persona or 'default'})[/dim]")
             console.print(f"[dim]Asking: {question}[/dim]\n")
-            console.print("[bold green]Agent:[/bold green] ", end="")
+            console.print(f"[bold cyan]{display_name or 'Agent'}:[/bold cyan] ", end="")
             response, error = send_question(question)
             
             # Save to memory

@@ -41,8 +41,13 @@ start_api() {
     # Create logs directory if it doesn't exist
     mkdir -p logs
     
-    # Start the API in background
-    python3 api.py 2>&1 | tee -a logs/api.log &
+    # Activate virtual environment if it exists
+    if [ -f "venv/bin/activate" ]; then
+        source venv/bin/activate
+    fi
+    
+    # Start the API in background (stderr to log file, stdout silent)
+    python3 api.py >> logs/api.log 2>&1 &
     NEW_PID=$!
     echo "Started API process with PID: $NEW_PID"
     
