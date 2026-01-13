@@ -341,7 +341,7 @@ def agent_ask(
             if not json_output:
                 console.print(f"[yellow]⚠️  Could not load agent memory: {e}[/yellow]")
     
-    def send_question(q: str, silent: bool = False) -> Tuple[str, Optional[str]]:
+    def send_question(q: str, silent: bool = False, use_streaming: bool = True) -> Tuple[str, Optional[str]]:
         """Send a question to the agent and return (response, error)."""
         user_principal = get_current_user_principal()
         payload = {
@@ -353,22 +353,29 @@ def agent_ask(
             "agent_name": display_name or "",
             "agent_background": agent_background,
             "ollama_url": resolved_ollama_url,
-            "stream": True
+            "stream": use_streaming
         }
         
         full_response = ""
         error = None
         try:
             url = f"{resolved_api_url}/api/ask"
-            with requests.post(url, json=payload, stream=True, timeout=300) as response:
+            if use_streaming:
+                with requests.post(url, json=payload, stream=True, timeout=300) as response:
+                    response.raise_for_status()
+                    for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
+                        if chunk:
+                            if not silent:
+                                print(chunk, end="", flush=True)
+                            full_response += chunk
+                if not silent:
+                    print()
+            else:
+                # Non-streaming mode - better for proxied connections like Cloudflare
+                response = requests.post(url, json=payload, timeout=300)
                 response.raise_for_status()
-                for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
-                    if chunk:
-                        if not silent:
-                            print(chunk, end="", flush=True)
-                        full_response += chunk
-            if not silent:
-                print()
+                result = response.json()
+                full_response = result.get("answer", "")
         except requests.exceptions.RequestException as e:
             error = str(e)
             if not silent:
@@ -418,8 +425,8 @@ def agent_ask(
     else:
         # Single question mode
         if json_output:
-            # JSON output mode - silent execution, structured response
-            response, error = send_question(question, silent=True)
+            # JSON output mode - silent execution, non-streaming (works better through proxies)
+            response, error = send_question(question, silent=True, use_streaming=False)
             
             result = {
                 "success": error is None and bool(response),
