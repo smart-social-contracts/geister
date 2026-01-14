@@ -141,11 +141,15 @@ If you cannot complete the step (e.g., missing permissions, errors), explain why
                 
                 log(f"  [{display_name}] Tool: {tool_name}")
                 
+                # Get agent's principal for auto-fill (e.g., proposer_id, voter_id)
+                agent_principal = agent_data.get('principal', '')
+                
                 tool_result = execute_tool(
                     tool_name, 
                     tool_args, 
                     network=DEFAULT_NETWORK,
-                    realm_folder='.'
+                    realm_folder='.',
+                    user_principal=agent_principal
                 )
                 
                 messages.append({

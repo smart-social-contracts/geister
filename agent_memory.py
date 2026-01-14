@@ -711,11 +711,33 @@ def update_agent_telos_state(agent_id: str, state: str) -> Optional[Dict]:
 
 
 def update_all_agents_telos_state(state: str) -> int:
-    """Update all agents' telos state. Returns count of updated agents."""
+    """Update all agents' telos state. Returns count of updated agents.
+    
+    If state is 'active', also assigns default telos to agents without one.
+    """
     conn = None
     try:
         conn = _get_db_connection()
         with conn.cursor() as cursor:
+            # If activating, first assign default telos to agents without one
+            if state == 'active':
+                default_template = get_default_template()
+                if default_template:
+                    template_id = default_template['id']
+                    # Get all agents without a telos
+                    cursor.execute("""
+                        SELECT agent_id FROM agent_profiles 
+                        WHERE agent_id NOT IN (SELECT agent_id FROM agent_telos)
+                    """)
+                    agents_without_telos = cursor.fetchall()
+                    
+                    for (agent_id,) in agents_without_telos:
+                        cursor.execute("""
+                            INSERT INTO agent_telos (agent_id, telos_template_id, state, current_step, step_results, started_at)
+                            VALUES (%s, %s, 'active', 0, '{}', NOW())
+                        """, (agent_id, template_id))
+            
+            # Now update all existing telos records
             updates = ["state = %s", "updated_at = NOW()"]
             values = [state]
             
