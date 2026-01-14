@@ -6,6 +6,6 @@ flask>=2.0.0
 flask-cors
 numpy>=1.24.0
 runpod
-realms-gos>=0.2.1
+realms-gos>=0.2.5
 typer>=0.9.0
 rich>=13.0.0

@@ -555,7 +555,7 @@ REALM_TOOLS = [
         "type": "function",
         "function": {
             "name": "cast_vote",
-            "description": "Cast a vote on a proposal. You must provide your voter_id (your user ID in the realm).",
+            "description": "Cast a vote on a proposal. Your voter_id is automatically filled from your identity.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -567,13 +567,9 @@ REALM_TOOLS = [
                         "type": "string",
                         "description": "Your vote",
                         "enum": ["yes", "no", "abstain"]
-                    },
-                    "voter_id": {
-                        "type": "string",
-                        "description": "Your user ID in the realm"
                     }
                 },
-                "required": ["proposal_id", "vote", "voter_id"]
+                "required": ["proposal_id", "vote"]
             }
         }
     },
@@ -581,20 +577,16 @@ REALM_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_my_vote",
-            "description": "Check if you have already voted on a proposal.",
+            "description": "Check if you have already voted on a proposal. Your voter_id is automatically filled from your identity.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "proposal_id": {
                         "type": "string",
                         "description": "The proposal ID to check"
-                    },
-                    "voter_id": {
-                        "type": "string",
-                        "description": "Your user ID in the realm"
                     }
                 },
-                "required": ["proposal_id", "voter_id"]
+                "required": ["proposal_id"]
             }
         }
     },
@@ -737,7 +729,7 @@ TOOL_FUNCTIONS = {
 }
 
 
-def execute_tool(tool_name: str, arguments: dict, network: str = "staging", realm_folder: str = ".", realm_principal: str = "") -> str:
+def execute_tool(tool_name: str, arguments: dict, network: str = "staging", realm_folder: str = ".", realm_principal: str = "", user_principal: str = "") -> str:
     """Execute a tool by name with given arguments."""
     if tool_name not in TOOL_FUNCTIONS:
         return json.dumps({"error": f"Unknown tool '{tool_name}'"})
@@ -753,6 +745,10 @@ def execute_tool(tool_name: str, arguments: dict, network: str = "staging", real
         "realm_folder": realm_folder,
         "realm_principal": realm_principal
     }
+    
+    # Auto-fill voter_id from user_principal for voting tools (agent's identity)
+    if "voter_id" in valid_params and "voter_id" not in arguments and user_principal:
+        filtered_args["voter_id"] = user_principal
     
     # Add any valid arguments from the LLM
     for key, value in arguments.items():

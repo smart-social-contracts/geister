@@ -484,7 +484,7 @@ def ask():
                     tool_name = tool_call['function']['name']
                     tool_args = tool_call['function']['arguments']
                     log(f"Executing tool: {tool_name} with args: {tool_args}")
-                    tool_result = execute_tool(tool_name, tool_args, network=network, realm_folder=realm_folder, realm_principal=realm_principal)
+                    tool_result = execute_tool(tool_name, tool_args, network=network, realm_folder=realm_folder, realm_principal=realm_principal, user_principal=user_principal)
                     log(f"Tool result: {tool_result[:500]}..." if len(tool_result) > 500 else f"Tool result: {tool_result}")
                     messages.append({"role": "tool", "content": tool_result})
             
@@ -539,6 +539,13 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
             return f"\n__DEBUG__ [{ts}] {msg}\n"
         return ""
     
+    def debug_block(label, content, level=1):
+        """Yield multi-line debug block with start/end markers. Returns the block or empty string."""
+        if verbosity >= level:
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            return f"\n__DEBUG_START__ [{ts}] {label}\n{content}\n__DEBUG_END__\n"
+        return ""
+    
     try:
         # Build messages for chat API
         messages = [
@@ -563,10 +570,14 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
         assistant_message = result.get('message', {})
         messages.append(assistant_message)
         
-        # Check if tool calls were requested
-        if assistant_message.get('tool_calls'):
-            log("Tool calls requested in streaming mode!")
-            dbg = debug("Tool calls requested in streaming mode!")
+        # Multi-step tool execution loop (same as non-streaming)
+        max_iterations = 10
+        iteration = 0
+        
+        while assistant_message.get('tool_calls') and iteration < max_iterations:
+            iteration += 1
+            log(f"Tool calls requested in streaming mode! (iteration {iteration})")
+            dbg = debug(f"Tool calls requested in streaming mode! (iteration {iteration})")
             if dbg:
                 yield dbg
             
@@ -580,10 +591,15 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
                     yield dbg
                 
                 # Execute the tool
-                tool_result = execute_tool(tool_name, tool_args, network=network, realm_folder=realm_folder, realm_principal=realm_principal)
+                tool_result = execute_tool(tool_name, tool_args, network=network, realm_folder=realm_folder, realm_principal=realm_principal, user_principal=user_principal)
                 
                 log(f"Tool result: {tool_result[:500]}..." if len(tool_result) > 500 else f"Tool result: {tool_result}")
-                dbg = debug(f"Tool result: {tool_result[:500]}..." if len(tool_result) > 500 else f"Tool result: {tool_result}")
+                # Pretty print JSON in debug block
+                try:
+                    pretty_result = json.dumps(json.loads(tool_result), indent=2)
+                except:
+                    pretty_result = tool_result
+                dbg = debug_block(f"Tool result ({tool_name})", pretty_result[:1000] if len(pretty_result) > 1000 else pretty_result)
                 if dbg:
                     yield dbg
                 
@@ -593,55 +609,88 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
                     "content": tool_result
                 })
             
-            # Stream the final response with tool results
-            log("Streaming final response with tool results...")
-            log(f"Messages being sent: {len(messages)} messages")
-            dbg = debug(f"Streaming final response with tool results... ({len(messages)} messages)")
+            # Check if more tool calls are needed (non-streaming check)
+            log(f"Checking for additional tool calls (iteration {iteration})...")
+            dbg = debug(f"Checking for additional tool calls (iteration {iteration})...")
             if dbg:
                 yield dbg
                 
-            final_response = requests.post(f"{ollama_url}/api/chat", json={
+            check_response = requests.post(f"{ollama_url}/api/chat", json={
                 "model": DEFAULT_LLM_MODEL,
                 "messages": messages,
-                "stream": True
-            }, stream=True)
+                "tools": REALM_TOOLS,
+                "stream": False
+            })
             
-            log(f"Final response status: {final_response.status_code}")
-            dbg = debug(f"Final response status: {final_response.status_code}")
-            if dbg:
-                yield dbg
-                
-            full_answer = ""
-            line_count = 0
-            for line in final_response.iter_lines():
-                line_count += 1
-                if line:
-                    log(f"Stream line {line_count}: {line[:200]}")
-                    dbg = debug(f"Stream line {line_count}: {line[:200].decode('utf-8') if isinstance(line, bytes) else line[:200]}", is_stream_line=True)
-                    if dbg:
-                        yield dbg
-                        
-                    data = json.loads(line.decode('utf-8'))
-                    if 'error' in data:
-                        log(f"Ollama error: {data['error']}")
-                        yield f"Error: {data['error']}"
-                        break
-                    if 'message' in data and 'content' in data['message']:
-                        chunk = data['message']['content']
-                        full_answer += chunk
-                        yield chunk
+            result = check_response.json()
+            assistant_message = result.get('message', {})
+            messages.append(assistant_message)
+            
+            # If no more tool calls and we have content, we're done with tools
+            if not assistant_message.get('tool_calls'):
+                break
+        
+        # Now stream the final response
+        if iteration > 0:
+            # We executed tools, check if we already have content from last check
+            final_content = assistant_message.get('content', '')
+            if final_content:
+                log(f"Final answer from tool loop: {final_content[:100]}...")
+                dbg = debug(f"Final answer from tool loop (iteration {iteration})")
+                if dbg:
+                    yield dbg
+                yield final_content
+                save_to_conversation(user_principal, realm_principal, question, final_content, prompt, persona_name, agent_id)
+            else:
+                # Stream a new response with all tool results
+                log("Streaming final response with tool results...")
+                log(f"Messages being sent: {len(messages)} messages")
+                dbg = debug(f"Streaming final response with tool results... ({len(messages)} messages)")
+                if dbg:
+                    yield dbg
                     
-                    if data.get('done', False):
-                        log(f"Stream done. Full answer length: {len(full_answer)}")
-                        dbg = debug(f"Stream done. Full answer length: {len(full_answer)}")
+                final_response = requests.post(f"{ollama_url}/api/chat", json={
+                    "model": DEFAULT_LLM_MODEL,
+                    "messages": messages[:-1] if not assistant_message.get('content') else messages,  # Remove empty assistant message
+                    "stream": True
+                }, stream=True)
+                
+                log(f"Final response status: {final_response.status_code}")
+                dbg = debug(f"Final response status: {final_response.status_code}")
+                if dbg:
+                    yield dbg
+                    
+                full_answer = ""
+                line_count = 0
+                for line in final_response.iter_lines():
+                    line_count += 1
+                    if line:
+                        log(f"Stream line {line_count}: {line[:200]}")
+                        dbg = debug(f"Stream line {line_count}: {line[:200].decode('utf-8') if isinstance(line, bytes) else line[:200]}", is_stream_line=True)
                         if dbg:
                             yield dbg
-                        save_to_conversation(user_principal, realm_principal, question, full_answer, prompt, persona_name, agent_id)
-                        break
-            log(f"Stream ended after {line_count} lines, answer: {full_answer[:100] if full_answer else '(empty)'}")
-            dbg = debug(f"Stream ended after {line_count} lines")
-            if dbg:
-                yield dbg
+                            
+                        data = json.loads(line.decode('utf-8'))
+                        if 'error' in data:
+                            log(f"Ollama error: {data['error']}")
+                            yield f"Error: {data['error']}"
+                            break
+                        if 'message' in data and 'content' in data['message']:
+                            chunk = data['message']['content']
+                            full_answer += chunk
+                            yield chunk
+                        
+                        if data.get('done', False):
+                            log(f"Stream done. Full answer length: {len(full_answer)}")
+                            dbg = debug(f"Stream done. Full answer length: {len(full_answer)}")
+                            if dbg:
+                                yield dbg
+                            save_to_conversation(user_principal, realm_principal, question, full_answer, prompt, persona_name, agent_id)
+                            break
+                log(f"Stream ended after {line_count} lines, answer: {full_answer[:100] if full_answer else '(empty)'}")
+                dbg = debug(f"Stream ended after {line_count} lines")
+                if dbg:
+                    yield dbg
         else:
             # No tool calls - stream directly using chat API
             log("No tools needed, streaming response...")

@@ -391,31 +391,56 @@ def agent_ask(
             text = buffer + text
             buffer = ""
             
-            # Check for debug markers
-            while "__DEBUG__" in text:
-                # Split at the debug marker
-                before, rest = text.split("__DEBUG__", 1)
-                
-                # Print content before debug marker (agent response - cyan)
-                if before.strip():
-                    console.print(f"[cyan]{before}[/cyan]", end="")
-                
-                # Find the end of the debug line
-                if "\n" in rest:
-                    # Find the second newline (debug messages are wrapped in \n...\n)
-                    parts = rest.split("\n", 2)
-                    if len(parts) >= 2:
-                        debug_content = parts[1] if parts[0] == "" else parts[0]
-                        text = parts[2] if len(parts) > 2 else ""
-                        # Print debug in dark grey
-                        console.print(f"[dim bright_black]__DEBUG__ {debug_content}[/dim bright_black]")
+            # Process text for debug markers
+            while True:
+                # Check for debug block markers first (multi-line)
+                if "__DEBUG_START__" in text:
+                    before, rest = text.split("__DEBUG_START__", 1)
+                    
+                    # Print content before debug block (agent response - cyan)
+                    if before.strip():
+                        console.print(f"[cyan]{before}[/cyan]", end="")
+                    
+                    # Check if we have the end marker
+                    if "__DEBUG_END__" in rest:
+                        block_content, after_end = rest.split("__DEBUG_END__", 1)
+                        # Print entire debug block in dim color
+                        console.print(f"[dim bright_black]__DEBUG_START__{block_content}__DEBUG_END__[/dim bright_black]", end="")
+                        text = after_end
+                        continue
                     else:
-                        text = rest
-                        break
+                        # Incomplete block, buffer it
+                        buffer = "__DEBUG_START__" + rest
+                        return
+                
+                # Check for single-line debug markers
+                elif "__DEBUG__" in text:
+                    # Split at the debug marker
+                    before, rest = text.split("__DEBUG__", 1)
+                    
+                    # Print content before debug marker (agent response - cyan)
+                    if before.strip():
+                        console.print(f"[cyan]{before}[/cyan]", end="")
+                    
+                    # Find the end of the debug line
+                    if "\n" in rest:
+                        # Find the second newline (debug messages are wrapped in \n...\n)
+                        parts = rest.split("\n", 2)
+                        if len(parts) >= 2:
+                            debug_content = parts[1] if parts[0] == "" else parts[0]
+                            text = parts[2] if len(parts) > 2 else ""
+                            # Print debug in dark grey
+                            console.print(f"[dim bright_black]__DEBUG__ {debug_content}[/dim bright_black]")
+                            continue
+                        else:
+                            text = rest
+                            break
+                    else:
+                        # Incomplete debug message, buffer it
+                        buffer = "__DEBUG__" + rest
+                        return
                 else:
-                    # Incomplete debug message, buffer it
-                    buffer = "__DEBUG__" + rest
-                    return
+                    break
             
             # Print remaining content (agent response - cyan)
             if text:
@@ -436,6 +461,15 @@ def agent_ask(
                                     console.print(f"[cyan]{chunk}[/cyan]", end="")
                             # Strip debug markers from stored response
                             clean_chunk = chunk
+                            # Strip block markers first
+                            while "__DEBUG_START__" in clean_chunk:
+                                before, rest = clean_chunk.split("__DEBUG_START__", 1)
+                                full_response += before
+                                if "__DEBUG_END__" in rest:
+                                    _, clean_chunk = rest.split("__DEBUG_END__", 1)
+                                else:
+                                    clean_chunk = ""
+                            # Then strip single-line markers
                             while "__DEBUG__" in clean_chunk:
                                 before, rest = clean_chunk.split("__DEBUG__", 1)
                                 full_response += before
