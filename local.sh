@@ -62,7 +62,7 @@ start_local() {
     echo "   Press Ctrl+C to stop"
     echo ""
     export DB_PASS=$DB_PASS
-    export ASHOKA_DEFAULT_MODEL=${ASHOKA_DEFAULT_MODEL:-gpt-oss:20b}
+    export DEFAULT_LLM_MODEL=${DEFAULT_LLM_MODEL:-gpt-oss:20b}
     python api.py
 }
 

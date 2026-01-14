@@ -8,7 +8,7 @@ import json
 from realm_tools import REALM_TOOLS, execute_tool
 
 OLLAMA_URL = "http://localhost:11434"
-MODEL = "llama3.2:1b"
+MODEL = "gpt-oss:20b"
 
 def test_tool_calling(question: str, realm_folder: str = "../realms/examples/demo/realm1", network: str = "staging"):
     print(f"\n{'='*60}")

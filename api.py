@@ -37,7 +37,7 @@ CORS(app,
 persona_manager = PersonaManager()
 
 # Model configuration with fallback
-ASHOKA_DEFAULT_MODEL = os.getenv('ASHOKA_DEFAULT_MODEL', 'llama3.2:1b')
+DEFAULT_LLM_MODEL = os.getenv('DEFAULT_LLM_MODEL', 'gpt-oss:20b')
 
 # Initialize database client
 db_client = DatabaseClient()
@@ -455,7 +455,7 @@ def ask():
                 log(f"Ollama iteration {iteration}...")
                 
                 response = requests.post(f"{ollama_url}/api/chat", json={
-                    "model": ASHOKA_DEFAULT_MODEL,
+                    "model": DEFAULT_LLM_MODEL,
                     "messages": messages,
                     "tools": REALM_TOOLS,
                     "stream": False
@@ -553,7 +553,7 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
             yield dbg
             
         response = requests.post(f"{ollama_url}/api/chat", json={
-            "model": ASHOKA_DEFAULT_MODEL,
+            "model": DEFAULT_LLM_MODEL,
             "messages": messages,
             "tools": REALM_TOOLS,
             "stream": False
@@ -601,7 +601,7 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
                 yield dbg
                 
             final_response = requests.post(f"{ollama_url}/api/chat", json={
-                "model": ASHOKA_DEFAULT_MODEL,
+                "model": DEFAULT_LLM_MODEL,
                 "messages": messages,
                 "stream": True
             }, stream=True)
@@ -660,7 +660,7 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
                 # Stream a new response
                 log(f"Streaming new response, messages count: {len(messages[:-1])}")
                 stream_response = requests.post(f"{ollama_url}/api/chat", json={
-                    "model": ASHOKA_DEFAULT_MODEL,
+                    "model": DEFAULT_LLM_MODEL,
                     "messages": messages[:-1],  # Remove empty assistant message
                     "stream": True
                 }, stream=True)
@@ -735,7 +735,7 @@ Format your response as exactly 3 questions, one per line, with no numbering or 
 
         # Send to Ollama to generate suggestions
         response = requests.post(f"{ollama_url}/api/generate", json={
-            "model": ASHOKA_DEFAULT_MODEL,
+            "model": DEFAULT_LLM_MODEL,
             "prompt": suggestions_prompt,
             "stream": False
         })
@@ -794,7 +794,7 @@ Format your response as exactly 3 questions, one per line, with no numbering or 
             "persona_used": persona_manager.default_persona
         })
 
-VERSION = "0.1.0"
+VERSION = "0.1.6"
 
 def get_git_info():
     """Get current git commit hash and datetime."""

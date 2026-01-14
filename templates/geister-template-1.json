@@ -9,7 +9,7 @@
   "ports": "11434/http,5000/http,8000/http,2222/tcp,5432/tcp,2222/udp,5432/udp",
   "env": [
     {
-      "key": "ASHOKA_DEFAULT_MODEL",
+      "key": "DEFAULT_LLM_MODEL",
       "value": "gpt-oss:20b"
     },
     {

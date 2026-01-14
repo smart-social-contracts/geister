@@ -173,7 +173,12 @@ class AgentMemory:
                         metadata = generate_agent_background(self.persona)
                     # Use human name if no display_name provided
                     if not display_name:
-                        display_name = generate_human_name(self.agent_id)
+                        # If agent_id is already a human-readable name (not swarm_agent_XXX format), use it directly
+                        import re
+                        if re.match(r'^swarm_agent_\d+$', self.agent_id):
+                            display_name = generate_human_name(self.agent_id)
+                        else:
+                            display_name = self.agent_id
                     cursor.execute("""
                         INSERT INTO agent_profiles 
                         (agent_id, principal, display_name, persona, last_active_at, total_sessions, metadata)

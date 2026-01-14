@@ -162,7 +162,7 @@ def print_info(message: str):
 def load_env_config() -> str:
     """Get API URL from environment variable or use default"""
     # Check environment variable first
-    url = os.environ.get('ASHOKA_API_URL', '')
+    url = os.environ.get('GEISTER_API_URL', '')
     if url:
         return url.rstrip('/')
     
