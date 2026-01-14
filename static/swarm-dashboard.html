@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geister Swarm Status</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'geister': {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                            900: '#0c4a6e'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .loading { opacity: 0.5; pointer-events: none; }
+        .modal-open { overflow: hidden; }
+        .chat-bubble { max-width: 85%; }
+        .chat-bubble-user { background: #0ea5e9; margin-left: auto; }
+        .chat-bubble-agent { background: #374151; margin-right: auto; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <!-- Header -->
+    <header class="bg-gray-800 border-b border-gray-700 sticky top-0 z-10">
+        <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                    <h1 class="text-xl sm:text-2xl font-bold text-geister-500">Geister Swarm</h1>
+                    <p class="text-sm text-gray-400" id="version-info">Loading...</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="openSwarmModal()" class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 justify-center">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+                        Swarm
+                    </button>
+                    <button onclick="refreshAll()" class="bg-geister-600 hover:bg-geister-700 px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 justify-center">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                        Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 py-6 sm:px-6">
+        <!-- Status Cards -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
+                <p class="text-gray-400 text-sm">API Status</p>
+                <p class="text-2xl font-bold" id="api-status">--</p>
+            </div>
+            <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
+                <p class="text-gray-400 text-sm">Total Agents</p>
+                <p class="text-2xl font-bold" id="total-agents">--</p>
+            </div>
+            <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
+                <p class="text-gray-400 text-sm">Total Sessions</p>
+                <p class="text-2xl font-bold" id="total-sessions">--</p>
+            </div>
+            <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
+                <p class="text-gray-400 text-sm">Inactivity</p>
+                <p class="text-2xl font-bold" id="inactivity">--</p>
+            </div>
+        </div>
+
+        <!-- Persona Distribution -->
+        <div class="bg-gray-800 rounded-xl p-4 border border-gray-700 mb-6">
+            <h2 class="text-lg font-semibold mb-3">Persona Distribution</h2>
+            <div class="flex flex-wrap gap-4" id="persona-stats">
+                <span class="text-gray-500">Loading...</span>
+            </div>
+        </div>
+
+        <!-- Telos Executor Status -->
+        <div class="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-6">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                <div>
+                    <h3 class="font-medium flex items-center gap-2">
+                        Telos Executor
+                        <span id="executor-status-badge" class="text-xs px-2 py-0.5 rounded bg-gray-600">Loading...</span>
+                    </h3>
+                    <p class="text-sm text-gray-400">Background engine that executes agent missions</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="toggleExecutor()" id="executor-toggle-btn" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-sm font-medium">
+                        ▶ Start
+                    </button>
+                    <button onclick="openExecutorLogModal()" class="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-sm font-medium">
+                        📜 View Log
+                    </button>
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-4 text-sm" id="executor-info">
+                <span class="text-gray-400">Interval: <span id="executor-interval">--</span>s</span>
+                <span class="text-gray-400">Model: <span id="executor-model">--</span></span>
+                <span class="text-gray-400">Executions: <span id="executor-count">0</span></span>
+            </div>
+        </div>
+
+        <!-- Bulk Telos Control -->
+        <div class="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-6">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                    <h3 class="font-medium">Bulk Agent Control</h3>
+                    <p class="text-sm text-gray-400">Set all agents' telos state at once</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="setAllAgentsState('active')" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-sm font-medium">
+                        ▶ Start All
+                    </button>
+                    <button onclick="setAllAgentsState('idle')" class="px-4 py-2 rounded-lg bg-yellow-600 hover:bg-yellow-700 text-sm font-medium">
+                        ⏸ Pause All
+                    </button>
+                    <button onclick="openTelosTemplatesModal()" class="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-sm font-medium">
+                        📋 Templates
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Agents Table -->
+        <div class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+            <div class="p-4 border-b border-gray-700 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+                <h2 class="text-lg font-semibold">Agents <span id="agents-count" class="text-sm font-normal text-gray-400"></span></h2>
+                <div class="flex items-center gap-2">
+                    <input type="text" id="agent-search" placeholder="Search by name..." 
+                        class="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm w-48 focus:outline-none focus:border-geister-500"
+                        oninput="filterAgents()">
+                    <button onclick="clearSearch()" class="text-gray-400 hover:text-white text-sm">Clear</button>
+                </div>
+            </div>
+            
+            <!-- Mobile Cards View -->
+            <div class="sm:hidden" id="agents-mobile">
+                <div class="p-4 text-gray-500">Loading agents...</div>
+            </div>
+            
+            <!-- Desktop Table View -->
+            <div class="hidden sm:block overflow-x-auto">
+                <table class="w-full">
+                    <thead class="bg-gray-750 text-left text-sm text-gray-400">
+                        <tr>
+                            <th class="px-4 py-3">Agent</th>
+                            <th class="px-4 py-3">Persona</th>
+                            <th class="px-4 py-3">Telos</th>
+                            <th class="px-4 py-3">Sessions</th>
+                            <th class="px-4 py-3">Last Active</th>
+                            <th class="px-4 py-3">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="agents-table" class="divide-y divide-gray-700">
+                        <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">Loading agents...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Pagination -->
+            <div class="p-4 border-t border-gray-700 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+                <div class="text-sm text-gray-400">
+                    Showing <span id="page-start">0</span>-<span id="page-end">0</span> of <span id="page-total">0</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="prevPage()" id="btn-prev" class="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed" disabled>← Prev</button>
+                    <span id="page-info" class="text-sm text-gray-400">Page 1</span>
+                    <button onclick="nextPage()" id="btn-next" class="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed" disabled>Next →</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Display -->
+        <div id="error-banner" class="hidden mt-4 bg-red-900/50 border border-red-700 rounded-xl p-4 text-red-200">
+            <p id="error-message"></p>
+        </div>
+    </main>
+
+    <!-- Agent Details Modal -->
+    <div id="agent-modal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-gray-800 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="p-4 border-b border-gray-700 flex justify-between items-center">
+                <h2 class="text-xl font-bold" id="modal-agent-name">Agent Details</h2>
+                <button onclick="closeAgentModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            
+            <!-- Tabs -->
+            <div class="flex border-b border-gray-700">
+                <button onclick="switchTab('details')" id="tab-details" class="px-4 py-2 text-geister-500 border-b-2 border-geister-500">Details</button>
+                <button onclick="switchTab('chat')" id="tab-chat" class="px-4 py-2 text-gray-400 hover:text-white">Chat</button>
+                <button onclick="switchTab('memories')" id="tab-memories" class="px-4 py-2 text-gray-400 hover:text-white">Memories</button>
+            </div>
+            
+            <!-- Details Tab -->
+            <div id="panel-details" class="flex-1 overflow-y-auto p-4">
+                <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="text-sm text-gray-400">Display Name</label>
+                            <input type="text" id="edit-display-name" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 mt-1">
+                        </div>
+                        <div>
+                            <label class="text-sm text-gray-400">Persona</label>
+                            <select id="edit-persona" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 mt-1">
+                                <option value="compliant">Compliant</option>
+                                <option value="watchful">Watchful</option>
+                                <option value="exploiter">Exploiter</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <label class="text-sm text-gray-400">Principal</label>
+                        <p id="agent-principal" class="font-mono text-sm bg-gray-700 rounded-lg px-3 py-2 mt-1 break-all"></p>
+                    </div>
+                    
+                    <div>
+                        <label class="text-sm text-gray-400">Background (metadata)</label>
+                        <div id="agent-background" class="bg-gray-700 rounded-lg px-3 py-2 mt-1 space-y-1 text-sm"></div>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4 text-sm">
+                        <div><span class="text-gray-400">Sessions:</span> <span id="agent-sessions"></span></div>
+                        <div><span class="text-gray-400">Created:</span> <span id="agent-created"></span></div>
+                    </div>
+                    
+                    <button onclick="saveAgentChanges()" class="w-full bg-geister-600 hover:bg-geister-700 px-4 py-2 rounded-lg font-medium">Save Changes</button>
+                </div>
+            </div>
+            
+            <!-- Chat Tab -->
+            <div id="panel-chat" class="flex-1 overflow-hidden hidden flex flex-col">
+                <div id="chat-messages" class="flex-1 overflow-y-auto p-4 space-y-3"></div>
+                <div class="p-4 border-t border-gray-700">
+                    <div class="flex gap-2">
+                        <input type="text" id="chat-input" placeholder="Type a message..." class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2" onkeypress="if(event.key==='Enter')sendChat()">
+                        <button onclick="sendChat()" id="chat-send-btn" class="bg-geister-600 hover:bg-geister-700 px-4 py-2 rounded-lg">Send</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Memories Tab -->
+            <div id="panel-memories" class="flex-1 overflow-y-auto p-4 hidden">
+                <div id="memories-list" class="space-y-3"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Swarm Management Modal -->
+    <div id="swarm-modal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-gray-800 rounded-2xl w-full max-w-md p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold">Swarm Management</h2>
+                <button onclick="closeSwarmModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="text-sm text-gray-400">Number of Agents</label>
+                    <input type="number" id="swarm-count" value="5" min="1" max="50" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 mt-1">
+                </div>
+                <div>
+                    <label class="text-sm text-gray-400">Start Index</label>
+                    <input type="number" id="swarm-start" value="1" min="1" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 mt-1">
+                </div>
+                <div>
+                    <label class="text-sm text-gray-400">Persona</label>
+                    <select id="swarm-persona" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 mt-1">
+                        <option value="compliant">Compliant</option>
+                        <option value="watchful">Watchful</option>
+                        <option value="exploiter">Exploiter</option>
+                    </select>
+                </div>
+                
+                <button onclick="recreateSwarm()" class="w-full bg-purple-600 hover:bg-purple-700 px-4 py-3 rounded-lg font-medium">Generate Agents</button>
+                
+                <div id="swarm-result" class="hidden text-sm p-3 rounded-lg"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Telos Templates Modal -->
+    <div id="telos-templates-modal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-gray-800 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="p-4 border-b border-gray-700 flex justify-between items-center">
+                <h2 class="text-xl font-bold">Telos Templates</h2>
+                <button onclick="closeTelosTemplatesModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            
+            <div class="p-4 overflow-y-auto flex-1 space-y-4">
+                <!-- Assign Default to All -->
+                <div class="bg-purple-900/30 border border-purple-700 rounded-lg p-3">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="font-medium">Assign Default Telos to All Agents</p>
+                            <p class="text-sm text-gray-400">Assigns the default template to agents without a telos</p>
+                        </div>
+                        <button onclick="assignDefaultToAll()" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg text-sm font-medium">
+                            Assign to All
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Existing Templates -->
+                <div>
+                    <h3 class="font-medium mb-3">Existing Templates</h3>
+                    <div id="telos-templates-list" class="space-y-3">
+                        <p class="text-gray-500">Loading...</p>
+                    </div>
+                </div>
+                
+                <!-- Create New Template -->
+                <div class="border-t border-gray-700 pt-4">
+                    <h3 class="font-medium mb-3">Create New Template</h3>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="text-sm text-gray-400">Name</label>
+                            <input type="text" id="new-template-name" placeholder="Citizen Onboarding" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 mt-1">
+                        </div>
+                        <div>
+                            <label class="text-sm text-gray-400">Description</label>
+                            <input type="text" id="new-template-description" placeholder="Steps for new citizens to get started" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 mt-1">
+                        </div>
+                        <div>
+                            <label class="text-sm text-gray-400">Steps (one per line)</label>
+                            <textarea id="new-template-steps" rows="6" placeholder="Find a realm you like&#10;Join the realm&#10;Set your avatar&#10;Check pending invoices&#10;Vote on proposals&#10;Create a proposal" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 mt-1 font-mono text-sm"></textarea>
+                        </div>
+                        <button onclick="createTelosTemplate()" class="w-full bg-purple-600 hover:bg-purple-700 px-4 py-3 rounded-lg font-medium">Create Template</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Executor Log Modal -->
+    <div id="executor-log-modal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-gray-800 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="p-4 border-b border-gray-700 flex justify-between items-center">
+                <h2 class="text-xl font-bold">Telos Execution Log</h2>
+                <button onclick="closeExecutorLogModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            
+            <div class="p-4 overflow-y-auto flex-1">
+                <div id="executor-log-list" class="space-y-2">
+                    <p class="text-gray-500">Loading...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="text-center text-gray-500 text-sm py-6">
+        <p>Geister Swarm Dashboard</p>
+    </footer>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let currentAgentId = null;
+        let currentAgentData = null;
+        let agentsCache = [];
+        let filteredAgents = [];
+        let currentPage = 1;
+        const PAGE_SIZE = 5;
+
+        const personaEmoji = { 'compliant': '🐑', 'watchful': '🦊', 'exploiter': '🦅', 'unknown': '❓' };
+        const personaColors = { 'compliant': 'bg-green-500', 'watchful': 'bg-yellow-500', 'exploiter': 'bg-red-500', 'unknown': 'bg-gray-500' };
+
+        function showError(msg) {
+            document.getElementById('error-banner').classList.remove('hidden');
+            document.getElementById('error-message').textContent = msg;
+        }
+        function hideError() { document.getElementById('error-banner').classList.add('hidden'); }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return 'Never';
+            const date = new Date(dateStr);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            if (diffDays < 7) return `${diffDays}d ago`;
+            return date.toLocaleDateString();
+        }
+
+        async function fetchHealth() {
+            try {
+                const res = await fetch(`${API_BASE}/`);
+                const data = await res.json();
+                document.getElementById('api-status').innerHTML = `<span class="text-green-400">Online</span>`;
+                const version = data.version || 'unknown';
+                const commit = data.git_commit ? ` (${data.git_commit})` : '';
+                document.getElementById('version-info').textContent = `v${version}${commit}`;
+                document.getElementById('inactivity').textContent = data.inactivity_timeout_seconds > 0 ? `${Math.floor((data.seconds_since_last_activity || 0) / 60)}m` : 'Disabled';
+                hideError();
+            } catch (e) {
+                document.getElementById('api-status').innerHTML = `<span class="text-red-400">Offline</span>`;
+                showError(`Cannot connect to API: ${e.message}`);
+            }
+        }
+
+        async function fetchAgents() {
+            try {
+                const res = await fetch(`${API_BASE}/api/agents`);
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error || 'Failed to fetch agents');
+                agentsCache = data.agents || [];
+                
+                document.getElementById('total-agents').textContent = agentsCache.length;
+                document.getElementById('total-sessions').textContent = agentsCache.reduce((sum, a) => sum + (a.total_sessions || 0), 0);
+                
+                const personaCounts = {};
+                agentsCache.forEach(a => { const p = a.persona || 'unknown'; personaCounts[p] = (personaCounts[p] || 0) + 1; });
+                document.getElementById('persona-stats').innerHTML = Object.entries(personaCounts).map(([persona, count]) => 
+                    `<a href="/dashboard/persona/${encodeURIComponent(persona)}" class="flex items-center gap-2 ${personaColors[persona] || 'bg-gray-500'}/20 px-3 py-2 rounded-lg hover:ring-2 hover:ring-white/20">
+                        <span class="text-xl">${personaEmoji[persona] || '❓'}</span>
+                        <span class="capitalize">${persona}</span>
+                        <span class="font-bold">${count}</span>
+                    </a>`
+                ).join('') || '<span class="text-gray-500">No agents</span>';
+                
+                // Apply filter and render
+                filterAgents();
+            } catch (e) {
+                document.getElementById('agents-table').innerHTML = `<tr><td colspan="6" class="px-4 py-8 text-center text-red-400">Error: ${e.message}</td></tr>`;
+            }
+        }
+
+        function filterAgents() {
+            const search = (document.getElementById('agent-search').value || '').toLowerCase().trim();
+            filteredAgents = search 
+                ? agentsCache.filter(a => (a.display_name || a.agent_id || '').toLowerCase().includes(search))
+                : [...agentsCache];
+            currentPage = 1;
+            renderAgentsPage();
+        }
+
+        function clearSearch() {
+            document.getElementById('agent-search').value = '';
+            filterAgents();
+        }
+
+        function renderAgentsPage() {
+            const totalPages = Math.ceil(filteredAgents.length / PAGE_SIZE);
+            const start = (currentPage - 1) * PAGE_SIZE;
+            const end = Math.min(start + PAGE_SIZE, filteredAgents.length);
+            const pageAgents = filteredAgents.slice(start, end);
+            
+            // Update count display
+            document.getElementById('agents-count').textContent = filteredAgents.length !== agentsCache.length 
+                ? `(${filteredAgents.length} of ${agentsCache.length})` 
+                : `(${agentsCache.length})`;
+            
+            // Update pagination info
+            document.getElementById('page-start').textContent = filteredAgents.length ? start + 1 : 0;
+            document.getElementById('page-end').textContent = end;
+            document.getElementById('page-total').textContent = filteredAgents.length;
+            document.getElementById('page-info').textContent = `Page ${currentPage} of ${totalPages || 1}`;
+            
+            // Update buttons
+            document.getElementById('btn-prev').disabled = currentPage <= 1;
+            document.getElementById('btn-next').disabled = currentPage >= totalPages;
+            
+            if (pageAgents.length === 0) {
+                document.getElementById('agents-table').innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">No agents found</td></tr>';
+                document.getElementById('agents-mobile').innerHTML = '<div class="p-4 text-gray-500">No agents found</div>';
+                return;
+            }
+            
+            const telosStateColors = { 'idle': 'bg-gray-600', 'active': 'bg-green-600', 'completed': 'bg-blue-600', 'failed': 'bg-red-600' };
+            
+            document.getElementById('agents-table').innerHTML = pageAgents.map(a => {
+                const telosState = a.telos_state || null;
+                const telosName = a.telos_name || (a.custom_telos ? 'Custom' : null);
+                return `
+                <tr class="hover:bg-gray-750/50 cursor-pointer" onclick="goToAgent('${a.display_name || a.agent_id}')">
+                    <td class="px-4 py-3">
+                        <div class="font-medium">${a.display_name || a.agent_id}</div>
+                        <div class="text-xs text-gray-500 font-mono">${(a.principal || '').substring(0, 15)}...</div>
+                    </td>
+                    <td class="px-4 py-3"><span class="inline-flex items-center gap-1 ${personaColors[a.persona] || 'bg-gray-500'}/20 px-2 py-1 rounded text-sm">${personaEmoji[a.persona] || '❓'} ${a.persona || 'unknown'}</span></td>
+                    <td class="px-4 py-3">
+                        ${telosState ? `<span class="inline-flex items-center gap-1 ${telosStateColors[telosState]}/20 px-2 py-1 rounded text-sm capitalize">${telosState}</span>` : '<span class="text-gray-500 text-sm">—</span>'}
+                        ${telosName ? `<div class="text-xs text-gray-500 mt-1">${telosName}</div>` : ''}
+                    </td>
+                    <td class="px-4 py-3">${a.total_sessions || 0}</td>
+                    <td class="px-4 py-3 text-gray-400">${formatDate(a.last_active_at)}</td>
+                    <td class="px-4 py-3">
+                        <a href="/dashboard/agent/${encodeURIComponent(a.agent_id)}" class="text-geister-500 hover:text-geister-400">View</a>
+                    </td>
+                </tr>`;
+            }).join('');
+            
+            document.getElementById('agents-mobile').innerHTML = pageAgents.map(a => {
+                const telosState = a.telos_state || null;
+                return `
+                <a href="/dashboard/agent/${encodeURIComponent(a.agent_id)}" class="block p-4 border-b border-gray-700 hover:bg-gray-750/50">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <div class="font-medium">${a.display_name || a.agent_id}</div>
+                            <div class="text-xs text-gray-500 font-mono">${(a.principal || '').substring(0, 20)}...</div>
+                        </div>
+                        <div class="flex flex-col items-end gap-1">
+                            <span class="inline-flex items-center gap-1 ${personaColors[a.persona] || 'bg-gray-500'}/20 px-2 py-1 rounded text-sm">${personaEmoji[a.persona] || '❓'} ${a.persona || 'unknown'}</span>
+                            ${telosState ? `<span class="inline-flex items-center ${telosStateColors[telosState]}/20 px-2 py-0.5 rounded text-xs capitalize">${telosState}</span>` : ''}
+                        </div>
+                    </div>
+                    <div class="flex justify-between text-sm text-gray-400">
+                        <span>${a.total_sessions || 0} sessions</span>
+                        <span>${formatDate(a.last_active_at)}</span>
+                    </div>
+                </a>`;
+            }).join('');
+        }
+
+        function prevPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                renderAgentsPage();
+            }
+        }
+
+        function nextPage() {
+            const totalPages = Math.ceil(filteredAgents.length / PAGE_SIZE);
+            if (currentPage < totalPages) {
+                currentPage++;
+                renderAgentsPage();
+            }
+        }
+
+        function goToAgent(name) {
+            window.location.href = `/dashboard/agent/${encodeURIComponent(name)}`;
+        }
+
+        async function refreshAll() {
+            document.body.classList.add('loading');
+            await Promise.all([fetchHealth(), fetchAgents()]);
+            document.body.classList.remove('loading');
+        }
+
+        // Agent Modal
+        async function openAgentModal(agentId, tab = 'details') {
+            currentAgentId = agentId;
+            document.getElementById('agent-modal').classList.remove('hidden');
+            document.body.classList.add('modal-open');
+            
+            try {
+                const res = await fetch(`${API_BASE}/api/agents/${agentId}`);
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                
+                currentAgentData = data;
+                const agent = data.agent;
+                
+                document.getElementById('modal-agent-name').textContent = `${personaEmoji[agent.persona] || '❓'} ${agent.display_name || agent.agent_id}`;
+                document.getElementById('edit-display-name').value = agent.display_name || '';
+                document.getElementById('edit-persona').value = agent.persona || 'compliant';
+                document.getElementById('agent-principal').textContent = agent.principal || 'N/A';
+                document.getElementById('agent-sessions').textContent = agent.total_sessions || 0;
+                document.getElementById('agent-created').textContent = formatDate(agent.created_at);
+                
+                const bg = agent.metadata || {};
+                document.getElementById('agent-background').innerHTML = Object.entries(bg).map(([k, v]) => 
+                    `<div><span class="text-gray-400 capitalize">${k}:</span> <span class="capitalize">${v}</span></div>`
+                ).join('') || '<span class="text-gray-500">No background data</span>';
+                
+                // Memories
+                const memories = data.memories || [];
+                document.getElementById('memories-list').innerHTML = memories.length ? memories.map(m => `
+                    <div class="bg-gray-700 rounded-lg p-3">
+                        <div class="flex justify-between text-sm mb-1">
+                            <span class="text-geister-400">${m.action_type || 'action'}</span>
+                            <span class="text-gray-500">${formatDate(m.created_at)}</span>
+                        </div>
+                        <p class="text-sm">${m.action_summary || ''}</p>
+                        ${m.emotional_state ? `<p class="text-xs text-gray-400 mt-1">Feeling: ${m.emotional_state}</p>` : ''}
+                    </div>
+                `).join('') : '<p class="text-gray-500">No memories recorded</p>';
+                
+                // Reset chat
+                document.getElementById('chat-messages').innerHTML = '<p class="text-gray-500 text-center">Start a conversation with this agent</p>';
+                
+                switchTab(tab);
+            } catch (e) {
+                alert('Error loading agent: ' + e.message);
+                closeAgentModal();
+            }
+        }
+
+        function closeAgentModal() {
+            document.getElementById('agent-modal').classList.add('hidden');
+            document.body.classList.remove('modal-open');
+            currentAgentId = null;
+            currentAgentData = null;
+        }
+
+        function switchTab(tab) {
+            ['details', 'chat', 'memories'].forEach(t => {
+                document.getElementById(`tab-${t}`).classList.toggle('text-geister-500', t === tab);
+                document.getElementById(`tab-${t}`).classList.toggle('border-b-2', t === tab);
+                document.getElementById(`tab-${t}`).classList.toggle('border-geister-500', t === tab);
+                document.getElementById(`tab-${t}`).classList.toggle('text-gray-400', t !== tab);
+                document.getElementById(`panel-${t}`).classList.toggle('hidden', t !== tab);
+            });
+        }
+
+        async function saveAgentChanges() {
+            if (!currentAgentId) return;
+            try {
+                const res = await fetch(`${API_BASE}/api/agents/${currentAgentId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        display_name: document.getElementById('edit-display-name').value,
+                        persona: document.getElementById('edit-persona').value
+                    })
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                alert('Agent updated successfully!');
+                fetchAgents();
+            } catch (e) {
+                alert('Error saving: ' + e.message);
+            }
+        }
+
+        async function sendChat() {
+            if (!currentAgentId) return;
+            const input = document.getElementById('chat-input');
+            const msg = input.value.trim();
+            if (!msg) return;
+            
+            input.value = '';
+            const container = document.getElementById('chat-messages');
+            
+            // Clear placeholder
+            if (container.querySelector('.text-gray-500')) container.innerHTML = '';
+            
+            // Add user message
+            container.innerHTML += `<div class="chat-bubble chat-bubble-user rounded-xl px-4 py-2 text-white">${msg}</div>`;
+            container.scrollTop = container.scrollHeight;
+            
+            // Add loading
+            const loadingId = 'loading-' + Date.now();
+            container.innerHTML += `<div id="${loadingId}" class="chat-bubble chat-bubble-agent rounded-xl px-4 py-2"><span class="animate-pulse">Thinking...</span></div>`;
+            container.scrollTop = container.scrollHeight;
+            
+            try {
+                document.getElementById('chat-send-btn').disabled = true;
+                const agent = currentAgentData?.agent || {};
+                const res = await fetch(`${API_BASE}/api/ask`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        question: msg,
+                        agent_id: currentAgentId,
+                        agent_name: agent.display_name,
+                        agent_background: agent.metadata,
+                        persona: agent.persona
+                    })
+                });
+                const data = await res.json();
+                document.getElementById(loadingId).remove();
+                
+                const reply = data.response || data.answer || data.error || 'No response';
+                container.innerHTML += `<div class="chat-bubble chat-bubble-agent rounded-xl px-4 py-2">${reply}</div>`;
+                container.scrollTop = container.scrollHeight;
+            } catch (e) {
+                document.getElementById(loadingId).innerHTML = `<span class="text-red-400">Error: ${e.message}</span>`;
+            } finally {
+                document.getElementById('chat-send-btn').disabled = false;
+            }
+        }
+
+        // Swarm Modal
+        function openSwarmModal() {
+            document.getElementById('swarm-modal').classList.remove('hidden');
+            document.getElementById('swarm-result').classList.add('hidden');
+        }
+        function closeSwarmModal() {
+            document.getElementById('swarm-modal').classList.add('hidden');
+        }
+
+        async function recreateSwarm() {
+            const count = parseInt(document.getElementById('swarm-count').value) || 5;
+            const start = parseInt(document.getElementById('swarm-start').value) || 1;
+            const persona = document.getElementById('swarm-persona').value;
+            
+            try {
+                const res = await fetch(`${API_BASE}/api/swarm/recreate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ count, start_index: start, persona })
+                });
+                const data = await res.json();
+                const result = document.getElementById('swarm-result');
+                result.classList.remove('hidden', 'bg-red-900/50', 'bg-green-900/50');
+                if (data.success) {
+                    result.classList.add('bg-green-900/50');
+                    result.textContent = data.message;
+                    setTimeout(() => { fetchAgents(); }, 3000);
+                } else {
+                    result.classList.add('bg-red-900/50');
+                    result.textContent = 'Error: ' + (data.error || 'Unknown error');
+                }
+            } catch (e) {
+                const result = document.getElementById('swarm-result');
+                result.classList.remove('hidden', 'bg-green-900/50');
+                result.classList.add('bg-red-900/50');
+                result.textContent = 'Error: ' + e.message;
+            }
+        }
+
+        // Bulk Telos State Control
+        async function setAllAgentsState(state) {
+            if (!confirm(`Set all agents to ${state}?`)) return;
+            
+            try {
+                const res = await fetch(`${API_BASE}/api/agents/telos/state`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ state })
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                alert(`Updated ${data.updated_count} agents to ${state}`);
+                fetchAgents();
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        // Telos Templates Modal
+        function openTelosTemplatesModal() {
+            document.getElementById('telos-templates-modal').classList.remove('hidden');
+            loadTelosTemplates();
+        }
+        function closeTelosTemplatesModal() {
+            document.getElementById('telos-templates-modal').classList.add('hidden');
+        }
+
+        async function loadTelosTemplates() {
+            try {
+                const res = await fetch(`${API_BASE}/api/telos/templates`);
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                
+                const list = document.getElementById('telos-templates-list');
+                if (data.templates.length === 0) {
+                    list.innerHTML = '<p class="text-gray-500">No templates yet. Create one below.</p>';
+                } else {
+                    list.innerHTML = data.templates.map(t => `
+                        <div class="bg-gray-700 rounded-lg p-4 ${t.is_default ? 'ring-2 ring-purple-500' : ''}">
+                            <div class="flex justify-between items-start mb-2">
+                                <div class="flex items-center gap-2">
+                                    <h4 class="font-medium">${t.name}</h4>
+                                    ${t.is_default ? '<span class="text-xs bg-purple-600 px-2 py-0.5 rounded">DEFAULT</span>' : ''}
+                                </div>
+                                <div class="flex gap-2">
+                                    ${!t.is_default ? `<button onclick="setDefaultTemplate(${t.id})" class="text-purple-400 hover:text-purple-300 text-sm">Set Default</button>` : ''}
+                                    <button onclick="deleteTelosTemplate(${t.id})" class="text-red-400 hover:text-red-300 text-sm">Delete</button>
+                                </div>
+                            </div>
+                            <p class="text-sm text-gray-400 mb-2">${t.description || 'No description'}</p>
+                            <div class="text-sm text-gray-300">
+                                ${(t.steps || []).map((s, i) => `<div class="flex gap-2"><span class="text-gray-500">${i+1}.</span>${s}</div>`).join('')}
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            } catch (e) {
+                document.getElementById('telos-templates-list').innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`;
+            }
+        }
+
+        async function setDefaultTemplate(id) {
+            try {
+                const res = await fetch(`${API_BASE}/api/telos/templates/${id}/set-default`, { method: 'POST' });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                loadTelosTemplates();
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function assignDefaultToAll() {
+            if (!confirm('Assign the default telos to all agents without a telos?')) return;
+            
+            try {
+                const res = await fetch(`${API_BASE}/api/telos/assign-default-to-all`, { method: 'POST' });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                alert(`Assigned "${data.template_name}" to ${data.assigned_count} agents`);
+                fetchAgents();
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function createTelosTemplate() {
+            const name = document.getElementById('new-template-name').value.trim();
+            const description = document.getElementById('new-template-description').value.trim();
+            const stepsText = document.getElementById('new-template-steps').value.trim();
+            
+            if (!name || !stepsText) {
+                alert('Name and steps are required');
+                return;
+            }
+            
+            const steps = stepsText.split('\n').map(s => s.trim()).filter(s => s);
+            
+            try {
+                const res = await fetch(`${API_BASE}/api/telos/templates`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, description, steps })
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                
+                document.getElementById('new-template-name').value = '';
+                document.getElementById('new-template-description').value = '';
+                document.getElementById('new-template-steps').value = '';
+                loadTelosTemplates();
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function deleteTelosTemplate(id) {
+            if (!confirm('Delete this template?')) return;
+            
+            try {
+                const res = await fetch(`${API_BASE}/api/telos/templates/${id}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                loadTelosTemplates();
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        // Executor Functions
+        let executorRunning = false;
+
+        async function fetchExecutorStatus() {
+            try {
+                const res = await fetch(`${API_BASE}/api/telos/executor/status`);
+                const data = await res.json();
+                if (!data.success) return;
+                
+                executorRunning = data.running;
+                
+                const badge = document.getElementById('executor-status-badge');
+                const btn = document.getElementById('executor-toggle-btn');
+                
+                if (data.running) {
+                    badge.textContent = 'Running';
+                    badge.className = 'text-xs px-2 py-0.5 rounded bg-green-600';
+                    btn.textContent = '⏸ Stop';
+                    btn.className = 'px-4 py-2 rounded-lg bg-yellow-600 hover:bg-yellow-700 text-sm font-medium';
+                } else {
+                    badge.textContent = 'Stopped';
+                    badge.className = 'text-xs px-2 py-0.5 rounded bg-gray-600';
+                    btn.textContent = '▶ Start';
+                    btn.className = 'px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-sm font-medium';
+                }
+                
+                document.getElementById('executor-interval').textContent = data.interval_seconds || '--';
+                document.getElementById('executor-model').textContent = data.model || '--';
+                document.getElementById('executor-count').textContent = data.recent_executions || 0;
+            } catch (e) {
+                console.error('Error fetching executor status:', e);
+            }
+        }
+
+        async function toggleExecutor() {
+            const endpoint = executorRunning ? 'stop' : 'start';
+            try {
+                const res = await fetch(`${API_BASE}/api/telos/executor/${endpoint}`, { method: 'POST' });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                fetchExecutorStatus();
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        function openExecutorLogModal() {
+            document.getElementById('executor-log-modal').classList.remove('hidden');
+            loadExecutorLog();
+        }
+
+        function closeExecutorLogModal() {
+            document.getElementById('executor-log-modal').classList.add('hidden');
+        }
+
+        async function loadExecutorLog() {
+            try {
+                const res = await fetch(`${API_BASE}/api/telos/executor/log?limit=50`);
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                
+                const list = document.getElementById('executor-log-list');
+                if (!data.log || data.log.length === 0) {
+                    list.innerHTML = '<p class="text-gray-500 text-center py-4">No executions yet. Start the executor and set agents to Active.</p>';
+                    return;
+                }
+                
+                list.innerHTML = data.log.map(entry => {
+                    const time = new Date(entry.timestamp).toLocaleString();
+                    const statusClass = entry.success ? 'text-green-400' : 'text-red-400';
+                    const statusIcon = entry.success ? '✓' : '✗';
+                    return `
+                        <div class="bg-gray-700 rounded-lg p-3">
+                            <div class="flex justify-between items-start mb-1">
+                                <span class="font-medium">${entry.agent_id}</span>
+                                <span class="text-xs text-gray-500">${time}</span>
+                            </div>
+                            <div class="text-sm text-gray-300 mb-1">
+                                <span class="${statusClass}">${statusIcon}</span> Step ${entry.step + 1}: ${entry.step_text}
+                            </div>
+                            ${entry.result ? `<pre class="text-xs text-gray-400 bg-gray-800 rounded p-2 mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap">${entry.result}</pre>` : ''}
+                        </div>
+                    `;
+                }).join('');
+            } catch (e) {
+                document.getElementById('executor-log-list').innerHTML = `<p class="text-red-400">Error: ${e.message}</p>`;
+            }
+        }
+
+        // Initial load
+        refreshAll();
+        fetchExecutorStatus();
+        setInterval(fetchExecutorStatus, 10000); // Poll every 10s
+    </script>
+</body>
+</html>

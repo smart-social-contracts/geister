@@ -157,6 +157,91 @@ def _run_realms_cli(
 
 
 # =============================================================================
+# Registry/Mundus Tools
+# =============================================================================
+
+def list_realms(network: str = "staging", realm_folder: str = ".") -> str:
+    """List all available realms in the mundus registry."""
+    import re
+    
+    cmd = ["realms", "registry", "list", "--network", network]
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=realm_folder,
+            env=_get_env()
+        )
+        
+        output = result.stdout + result.stderr
+        
+        # Parse the Candid output to extract realm info
+        realms = []
+        # Match record blocks
+        record_pattern = r'record \{([^}]+)\}'
+        for match in re.finditer(record_pattern, output, re.DOTALL):
+            record_text = match.group(1)
+            realm = {}
+            
+            # Extract fields
+            id_match = re.search(r'id = "([^"]+)"', record_text)
+            name_match = re.search(r'name = "([^"]+)"', record_text)
+            url_match = re.search(r'url = "([^"]+)"', record_text)
+            backend_match = re.search(r'backend_url = "([^"]+)"', record_text)
+            users_match = re.search(r'users_count = (\d+)', record_text)
+            
+            if id_match:
+                realm['id'] = id_match.group(1)
+            if name_match:
+                realm['name'] = name_match.group(1)
+            if url_match:
+                realm['url'] = f"https://{url_match.group(1)}"
+            if backend_match:
+                realm['backend_url'] = backend_match.group(1)
+            if users_match:
+                realm['users_count'] = int(users_match.group(1))
+            
+            if realm.get('name'):
+                realms.append(realm)
+        
+        if realms:
+            return json.dumps({"realms": realms, "count": len(realms)})
+        elif "Error" in output:
+            return json.dumps({"error": output})
+        else:
+            return json.dumps({"realms": [], "count": 0, "message": "No realms found in registry"})
+            
+    except subprocess.TimeoutExpired:
+        return json.dumps({"error": "Command timed out"})
+    except Exception as e:
+        traceback.print_exc()
+        return json.dumps({"error": str(e)})
+
+
+def search_realm(query: str, network: str = "staging", realm_folder: str = ".") -> str:
+    """Search for a realm by name in the mundus registry."""
+    cmd = ["realms", "registry", "search", "--query", query, "--network", network]
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=realm_folder,
+            env=_get_env()
+        )
+        return result.stdout.strip() or result.stderr.strip() or json.dumps({"message": "No results found"})
+    except subprocess.TimeoutExpired:
+        return json.dumps({"error": "Command timed out"})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+# =============================================================================
 # Citizen Tools
 # =============================================================================
 
@@ -303,6 +388,25 @@ def get_my_vote(proposal_id: str, voter_id: str, network: str = "staging", realm
     )
 
 
+def submit_proposal(title: str, description: str, proposer_id: str, code_url: str = "", network: str = "staging", realm_folder: str = ".") -> str:
+    """Submit a new proposal for voting."""
+    args = {
+        "title": title,
+        "description": description,
+        "proposer": proposer_id
+    }
+    if code_url:
+        args["code_url"] = code_url
+    
+    return _run_extension_call(
+        extension="voting",
+        function="submit_proposal",
+        args=args,
+        network=network,
+        realm_folder=realm_folder
+    )
+
+
 # =============================================================================
 # Economic / Vault Tools
 # =============================================================================
@@ -420,6 +524,32 @@ def icw_get_address(network: str = "staging", realm_folder: str = ".") -> str:
 # =============================================================================
 
 REALM_TOOLS = [
+    # Registry/Mundus Tools
+    {
+        "type": "function",
+        "function": {
+            "name": "list_realms",
+            "description": "List all available realms in the mundus registry. Returns realm names, IDs, URLs, and user counts. Use this to discover what realms exist before joining one.",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_realm",
+            "description": "Search for a specific realm by name in the mundus registry. Returns detailed information about matching realms.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query (realm name or partial name)"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
     # Citizen Tools
     {
         "type": "function",
@@ -590,6 +720,31 @@ REALM_TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "submit_proposal",
+            "description": "Submit a new proposal for voting. Your proposer_id is automatically filled from your identity.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Title of the proposal (short, descriptive)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Detailed description of the proposal"
+                    },
+                    "code_url": {
+                        "type": "string",
+                        "description": "Optional URL to proposal code/implementation"
+                    }
+                },
+                "required": ["title", "description"]
+            }
+        }
+    },
     # Economic / Vault Tools
     {
         "type": "function",
@@ -704,6 +859,9 @@ REALM_TOOLS = [
 
 # Map function names to actual functions
 TOOL_FUNCTIONS = {
+    # Registry/Mundus
+    "list_realms": list_realms,
+    "search_realm": search_realm,
     # Citizen
     "join_realm": join_realm,
     "set_profile_picture": set_profile_picture,
@@ -718,6 +876,7 @@ TOOL_FUNCTIONS = {
     "get_proposal": get_proposal,
     "cast_vote": cast_vote,
     "get_my_vote": get_my_vote,
+    "submit_proposal": submit_proposal,
     # Economic
     "get_balance": get_balance,
     "get_transactions": get_transactions,
@@ -749,6 +908,10 @@ def execute_tool(tool_name: str, arguments: dict, network: str = "staging", real
     # Auto-fill voter_id from user_principal for voting tools (agent's identity)
     if "voter_id" in valid_params and "voter_id" not in arguments and user_principal:
         filtered_args["voter_id"] = user_principal
+    
+    # Auto-fill proposer_id from user_principal for submit_proposal tool
+    if "proposer_id" in valid_params and "proposer_id" not in arguments and user_principal:
+        filtered_args["proposer_id"] = user_principal
     
     # Add any valid arguments from the LLM
     for key, value in arguments.items():

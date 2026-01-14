@@ -57,3 +57,37 @@ GRANT ALL PRIVILEGES ON TABLE agent_memories TO geister_user;
 GRANT USAGE, SELECT ON SEQUENCE agent_memories_id_seq TO geister_user;
 GRANT ALL PRIVILEGES ON TABLE agent_profiles TO geister_user;
 GRANT USAGE, SELECT ON SEQUENCE agent_profiles_id_seq TO geister_user;
+
+-- Telos templates (reusable mission definitions)
+CREATE TABLE IF NOT EXISTS telos_templates (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    steps JSONB NOT NULL,              -- Array of step descriptions
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Agent telos assignments
+CREATE TABLE IF NOT EXISTS agent_telos (
+    id SERIAL PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    telos_template_id INTEGER REFERENCES telos_templates(id) ON DELETE SET NULL,
+    custom_telos TEXT,                 -- Free-form telos if not using template
+    current_step INTEGER DEFAULT 0,
+    step_results JSONB DEFAULT '{}',   -- {"0": {"status": "completed", "result": "..."}, ...}
+    state TEXT DEFAULT 'idle',         -- 'idle', 'active', 'completed', 'failed'
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for telos tables
+CREATE INDEX IF NOT EXISTS idx_agent_telos_agent_id ON agent_telos(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_telos_state ON agent_telos(state);
+
+GRANT ALL PRIVILEGES ON TABLE telos_templates TO geister_user;
+GRANT USAGE, SELECT ON SEQUENCE telos_templates_id_seq TO geister_user;
+GRANT ALL PRIVILEGES ON TABLE agent_telos TO geister_user;
+GRANT USAGE, SELECT ON SEQUENCE agent_telos_id_seq TO geister_user;

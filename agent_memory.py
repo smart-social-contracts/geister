@@ -370,7 +370,7 @@ class AgentMemory:
         memories = self.recall(realm_principal=realm_principal, limit=100)
         
         if not memories:
-            return {"total": 0, "action_types": {}, "realms": set()}
+            return {"total": 0, "action_types": {}, "realms": []}
         
         action_counts = {}
         realms = set()
@@ -434,7 +434,7 @@ def get_agent_id_by_display_name(display_name: str) -> Optional[str]:
 
 
 def list_all_agents() -> List[Dict]:
-    """List all agent profiles."""
+    """List all agent profiles with their telos state."""
     conn = None
     try:
         conn = psycopg2.connect(
@@ -446,14 +446,328 @@ def list_all_agents() -> List[Dict]:
         )
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             cursor.execute("""
-                SELECT agent_id, principal, display_name, persona, 
-                       total_sessions, created_at, last_active_at
-                FROM agent_profiles 
-                ORDER BY last_active_at DESC
+                SELECT p.agent_id, p.principal, p.display_name, p.persona, 
+                       p.total_sessions, p.created_at, p.last_active_at,
+                       t.state as telos_state, t.current_step, t.custom_telos,
+                       tt.name as telos_name, tt.steps as telos_steps
+                FROM agent_profiles p
+                LEFT JOIN agent_telos t ON p.agent_id = t.agent_id
+                LEFT JOIN telos_templates tt ON t.telos_template_id = tt.id
+                ORDER BY p.last_active_at DESC
             """)
             return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
         raise DatabaseConnectionError(f"Database connection required: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+# =============================================================================
+# Telos Management Functions
+# =============================================================================
+
+def _get_db_connection():
+    """Get a database connection."""
+    return psycopg2.connect(
+        host=os.getenv('DB_HOST', 'localhost'),
+        database=os.getenv('DB_NAME', 'geister_db'),
+        user=os.getenv('DB_USER', 'geister_user'),
+        password=os.getenv('DB_PASS', 'geister_pass'),
+        port=os.getenv('DB_PORT', '5432')
+    )
+
+
+def _ensure_is_default_column():
+    """Ensure is_default column exists in telos_templates."""
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                ALTER TABLE telos_templates 
+                ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE
+            """)
+            conn.commit()
+    except Exception:
+        pass  # Column may already exist
+    finally:
+        if conn:
+            conn.close()
+
+# Run migration on module load
+try:
+    _ensure_is_default_column()
+except:
+    pass
+
+
+def list_telos_templates() -> List[Dict]:
+    """List all telos templates."""
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                SELECT id, name, description, steps, is_default, created_at, updated_at
+                FROM telos_templates
+                ORDER BY is_default DESC, name
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_telos_template(template_id: int) -> Optional[Dict]:
+    """Get a specific telos template."""
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                "SELECT * FROM telos_templates WHERE id = %s",
+                (template_id,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        if conn:
+            conn.close()
+
+
+def create_telos_template(name: str, description: str, steps: List[str]) -> Dict:
+    """Create a new telos template."""
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                INSERT INTO telos_templates (name, description, steps)
+                VALUES (%s, %s, %s)
+                RETURNING *
+            """, (name, description, json.dumps(steps)))
+            result = cursor.fetchone()
+            conn.commit()
+            return dict(result)
+    finally:
+        if conn:
+            conn.close()
+
+
+def update_telos_template(template_id: int, name: str = None, description: str = None, steps: List[str] = None) -> Optional[Dict]:
+    """Update a telos template."""
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            updates = []
+            values = []
+            if name is not None:
+                updates.append("name = %s")
+                values.append(name)
+            if description is not None:
+                updates.append("description = %s")
+                values.append(description)
+            if steps is not None:
+                updates.append("steps = %s")
+                values.append(json.dumps(steps))
+            
+            if not updates:
+                return get_telos_template(template_id)
+            
+            updates.append("updated_at = NOW()")
+            values.append(template_id)
+            
+            cursor.execute(f"""
+                UPDATE telos_templates SET {', '.join(updates)}
+                WHERE id = %s RETURNING *
+            """, values)
+            result = cursor.fetchone()
+            conn.commit()
+            return dict(result) if result else None
+    finally:
+        if conn:
+            conn.close()
+
+
+def set_default_template(template_id: int) -> Optional[Dict]:
+    """Set a template as the default (only one can be default)."""
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            # Clear existing default
+            cursor.execute("UPDATE telos_templates SET is_default = FALSE WHERE is_default = TRUE")
+            # Set new default
+            cursor.execute(
+                "UPDATE telos_templates SET is_default = TRUE WHERE id = %s RETURNING *",
+                (template_id,)
+            )
+            result = cursor.fetchone()
+            conn.commit()
+            return dict(result) if result else None
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_default_template() -> Optional[Dict]:
+    """Get the default telos template."""
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("SELECT * FROM telos_templates WHERE is_default = TRUE LIMIT 1")
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        if conn:
+            conn.close()
+
+
+def delete_telos_template(template_id: int) -> bool:
+    """Delete a telos template."""
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM telos_templates WHERE id = %s", (template_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_agent_telos(agent_id: str) -> Optional[Dict]:
+    """Get an agent's current telos assignment."""
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                SELECT t.*, tt.name as template_name, tt.description as template_description, tt.steps as template_steps
+                FROM agent_telos t
+                LEFT JOIN telos_templates tt ON t.telos_template_id = tt.id
+                WHERE t.agent_id = %s
+                ORDER BY t.created_at DESC LIMIT 1
+            """, (agent_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        if conn:
+            conn.close()
+
+
+def assign_telos_to_agent(agent_id: str, template_id: int = None, custom_telos: str = None) -> Dict:
+    """Assign a telos to an agent (template or custom)."""
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            # Remove any existing telos for this agent
+            cursor.execute("DELETE FROM agent_telos WHERE agent_id = %s", (agent_id,))
+            
+            # Create new assignment
+            cursor.execute("""
+                INSERT INTO agent_telos (agent_id, telos_template_id, custom_telos, state)
+                VALUES (%s, %s, %s, 'idle')
+                RETURNING *
+            """, (agent_id, template_id, custom_telos))
+            result = cursor.fetchone()
+            conn.commit()
+            return dict(result)
+    finally:
+        if conn:
+            conn.close()
+
+
+def update_agent_telos_state(agent_id: str, state: str) -> Optional[Dict]:
+    """Update an agent's telos state (idle, active, completed, failed)."""
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            updates = ["state = %s", "updated_at = NOW()"]
+            values = [state]
+            
+            if state == 'active':
+                updates.append("started_at = COALESCE(started_at, NOW())")
+            elif state in ('completed', 'failed'):
+                updates.append("completed_at = NOW()")
+            
+            values.append(agent_id)
+            cursor.execute(f"""
+                UPDATE agent_telos SET {', '.join(updates)}
+                WHERE agent_id = %s RETURNING *
+            """, values)
+            result = cursor.fetchone()
+            conn.commit()
+            return dict(result) if result else None
+    finally:
+        if conn:
+            conn.close()
+
+
+def update_all_agents_telos_state(state: str) -> int:
+    """Update all agents' telos state. Returns count of updated agents."""
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor() as cursor:
+            updates = ["state = %s", "updated_at = NOW()"]
+            values = [state]
+            
+            if state == 'active':
+                updates.append("started_at = COALESCE(started_at, NOW())")
+            elif state in ('completed', 'failed'):
+                updates.append("completed_at = NOW()")
+            
+            cursor.execute(f"UPDATE agent_telos SET {', '.join(updates)}", values)
+            conn.commit()
+            return cursor.rowcount
+    finally:
+        if conn:
+            conn.close()
+
+
+def update_agent_telos_progress(agent_id: str, current_step: int, step_result: Dict = None) -> Optional[Dict]:
+    """Update an agent's telos progress."""
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            if step_result:
+                cursor.execute("""
+                    UPDATE agent_telos 
+                    SET current_step = %s, 
+                        step_results = step_results || %s,
+                        updated_at = NOW()
+                    WHERE agent_id = %s RETURNING *
+                """, (current_step, json.dumps({str(current_step): step_result}), agent_id))
+            else:
+                cursor.execute("""
+                    UPDATE agent_telos SET current_step = %s, updated_at = NOW()
+                    WHERE agent_id = %s RETURNING *
+                """, (current_step, agent_id))
+            result = cursor.fetchone()
+            conn.commit()
+            return dict(result) if result else None
+    finally:
+        if conn:
+            conn.close()
+
+
+def remove_agent_telos(agent_id: str) -> bool:
+    """Remove an agent's telos assignment."""
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM agent_telos WHERE agent_id = %s", (agent_id,))
+            conn.commit()
+            return cursor.rowcount > 0
     finally:
         if conn:
             conn.close()

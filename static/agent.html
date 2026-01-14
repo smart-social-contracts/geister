@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent - Geister Swarm</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'geister': {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                            900: '#0c4a6e'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .chat-container { height: calc(100vh - 280px); min-height: 300px; }
+        @media (max-width: 640px) { .chat-container { height: calc(100vh - 320px); } }
+        .chat-bubble { max-width: 85%; }
+        .chat-bubble-user { background: #0ea5e9; margin-left: auto; }
+        .chat-bubble-agent { background: #374151; margin-right: auto; }
+        /* Markdown styles */
+        .markdown-body { line-height: 1.6; }
+        .markdown-body p { margin-bottom: 0.5rem; }
+        .markdown-body p:last-child { margin-bottom: 0; }
+        .markdown-body strong { font-weight: 600; color: #fff; }
+        .markdown-body em { font-style: italic; }
+        .markdown-body code { background: #1f2937; padding: 0.125rem 0.375rem; border-radius: 0.25rem; font-size: 0.875rem; }
+        .markdown-body pre { background: #1f2937; padding: 0.75rem; border-radius: 0.5rem; overflow-x: auto; margin: 0.5rem 0; }
+        .markdown-body pre code { background: none; padding: 0; }
+        .markdown-body ul, .markdown-body ol { margin: 0.5rem 0; padding-left: 1.5rem; }
+        .markdown-body li { margin: 0.25rem 0; }
+        .markdown-body h1, .markdown-body h2, .markdown-body h3 { font-weight: 600; margin: 0.75rem 0 0.5rem; }
+        .markdown-body h1 { font-size: 1.25rem; }
+        .markdown-body h2 { font-size: 1.125rem; }
+        .markdown-body h3 { font-size: 1rem; }
+        .markdown-body blockquote { border-left: 3px solid #4b5563; padding-left: 0.75rem; margin: 0.5rem 0; color: #9ca3af; }
+        .markdown-body a { color: #38bdf8; text-decoration: underline; }
+        .markdown-body hr { border-color: #4b5563; margin: 0.75rem 0; }
+        /* Debug dropdown */
+        .debug-toggle { cursor: pointer; user-select: none; }
+        .debug-content { max-height: 400px; overflow-y: auto; }
+        .debug-item { border-left: 3px solid; padding-left: 0.75rem; margin: 0.5rem 0; }
+        .debug-thinking { border-color: #8b5cf6; }
+        .debug-tool-call { border-color: #f59e0b; }
+        .debug-tool-response { border-color: #10b981; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <!-- Header -->
+    <header class="bg-gray-800 border-b border-gray-700">
+        <div class="max-w-5xl mx-auto px-4 py-4 sm:px-6">
+            <div class="flex items-center gap-4">
+                <a href="/dashboard" class="text-gray-400 hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                </a>
+                <div class="flex-1">
+                    <h1 class="text-xl sm:text-2xl font-bold" id="agent-title">Loading...</h1>
+                    <p class="text-sm text-gray-400" id="agent-subtitle"></p>
+                </div>
+                <div id="persona-badge" class="hidden sm:flex items-center gap-2 px-3 py-1 rounded-lg text-sm"></div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-5xl mx-auto px-4 py-6 sm:px-6">
+        <!-- Tabs -->
+        <div class="flex border-b border-gray-700 mb-6">
+            <button onclick="switchTab('chat')" id="tab-chat" class="px-4 py-2 text-geister-500 border-b-2 border-geister-500 font-medium">Chat</button>
+            <button onclick="switchTab('telos')" id="tab-telos" class="px-4 py-2 text-gray-400 hover:text-white">Telos</button>
+            <button onclick="switchTab('details')" id="tab-details" class="px-4 py-2 text-gray-400 hover:text-white">Details</button>
+            <button onclick="switchTab('memories')" id="tab-memories" class="px-4 py-2 text-gray-400 hover:text-white">Memories</button>
+        </div>
+
+        <!-- Chat Tab -->
+        <div id="panel-chat">
+            <div class="flex justify-end mb-2">
+                <button onclick="clearChat()" class="text-xs text-gray-500 hover:text-gray-300">Clear chat</button>
+            </div>
+            <div id="chat-messages" class="chat-container overflow-y-auto space-y-3 bg-gray-800 rounded-xl p-4 mb-4">
+                <p class="text-gray-500 text-center py-8">Start a conversation with this agent</p>
+            </div>
+            <div class="flex gap-2">
+                <input type="text" id="chat-input" placeholder="Type a message..." 
+                    class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 focus:outline-none focus:border-geister-500" 
+                    onkeypress="if(event.key==='Enter')sendChat()">
+                <button onclick="sendChat()" id="chat-send-btn" class="bg-geister-600 hover:bg-geister-700 px-6 py-3 rounded-xl font-medium">Send</button>
+            </div>
+        </div>
+
+        <!-- Details Tab -->
+        <div id="panel-details" class="hidden">
+            <div class="bg-gray-800 rounded-xl p-6 space-y-6">
+                <div class="grid sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="text-sm text-gray-400">Display Name</label>
+                        <input type="text" id="edit-display-name" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 mt-1">
+                    </div>
+                    <div>
+                        <label class="text-sm text-gray-400">Persona</label>
+                        <select id="edit-persona" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 mt-1">
+                            <option value="compliant">Compliant</option>
+                            <option value="watchful">Watchful</option>
+                            <option value="exploiter">Exploiter</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div>
+                    <label class="text-sm text-gray-400">Agent ID</label>
+                    <p id="agent-id" class="font-mono text-sm bg-gray-700 rounded-lg px-4 py-3 mt-1"></p>
+                </div>
+                
+                <div>
+                    <label class="text-sm text-gray-400">Principal</label>
+                    <p id="agent-principal" class="font-mono text-sm bg-gray-700 rounded-lg px-4 py-3 mt-1 break-all"></p>
+                </div>
+                
+                <div>
+                    <label class="text-sm text-gray-400">Background</label>
+                    <div id="agent-background" class="bg-gray-700 rounded-lg px-4 py-3 mt-1 grid sm:grid-cols-2 gap-2 text-sm"></div>
+                </div>
+                
+                <div class="grid sm:grid-cols-3 gap-4 text-sm">
+                    <div class="bg-gray-700 rounded-lg p-3">
+                        <span class="text-gray-400 block">Sessions</span>
+                        <span id="agent-sessions" class="text-xl font-bold"></span>
+                    </div>
+                    <div class="bg-gray-700 rounded-lg p-3">
+                        <span class="text-gray-400 block">Created</span>
+                        <span id="agent-created"></span>
+                    </div>
+                    <div class="bg-gray-700 rounded-lg p-3">
+                        <span class="text-gray-400 block">Last Active</span>
+                        <span id="agent-last-active"></span>
+                    </div>
+                </div>
+                
+                <button onclick="saveAgentChanges()" class="w-full bg-geister-600 hover:bg-geister-700 px-4 py-3 rounded-lg font-medium">Save Changes</button>
+            </div>
+        </div>
+
+        <!-- Telos Tab -->
+        <div id="panel-telos" class="hidden">
+            <div class="bg-gray-800 rounded-xl p-6 space-y-6">
+                <!-- State Toggle -->
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="font-medium">Agent State</h3>
+                        <p class="text-sm text-gray-400">Toggle between idle and active</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span id="telos-state-label" class="text-sm px-3 py-1 rounded-full bg-gray-600">No telos</span>
+                        <button onclick="toggleTelosState()" id="telos-state-btn" class="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-50" disabled>
+                            Start
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Current Telos Display -->
+                <div id="current-telos-section">
+                    <h3 class="font-medium mb-3">Current Telos</h3>
+                    <div id="current-telos-display" class="bg-gray-700 rounded-lg p-4">
+                        <p class="text-gray-400">No telos assigned</p>
+                    </div>
+                </div>
+
+                <!-- Progress -->
+                <div id="telos-progress-section" class="hidden">
+                    <h3 class="font-medium mb-3">Progress</h3>
+                    <div id="telos-progress" class="space-y-2"></div>
+                </div>
+
+                <!-- Assign Telos -->
+                <div class="border-t border-gray-700 pt-6">
+                    <h3 class="font-medium mb-3">Assign New Telos</h3>
+                    
+                    <!-- Template Selection -->
+                    <div class="mb-4">
+                        <label class="text-sm text-gray-400">From Template</label>
+                        <select id="telos-template-select" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 mt-1" onchange="onTemplateSelect()">
+                            <option value="">-- Select a template --</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Or Custom -->
+                    <div class="mb-4">
+                        <label class="text-sm text-gray-400">Or Custom Telos (one step per line)</label>
+                        <textarea id="custom-telos-input" rows="6" placeholder="Find a realm you like&#10;Join the realm&#10;Set your avatar&#10;Check pending invoices&#10;Vote on proposals&#10;Create a proposal" 
+                            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 mt-1 font-mono text-sm"></textarea>
+                    </div>
+                    
+                    <div class="flex gap-3">
+                        <button onclick="assignTelos()" class="flex-1 bg-purple-600 hover:bg-purple-700 px-4 py-3 rounded-lg font-medium">Assign Telos</button>
+                        <button onclick="removeTelos()" class="px-4 py-3 rounded-lg bg-red-600/20 text-red-400 hover:bg-red-600/30">Remove</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Memories Tab -->
+        <div id="panel-memories" class="hidden">
+            <div class="bg-gray-800 rounded-xl p-4">
+                <div id="memory-stats" class="mb-4 pb-4 border-b border-gray-700 flex flex-wrap gap-4 text-sm"></div>
+                <div id="memories-list" class="space-y-3"></div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const API_BASE = window.location.origin;
+        const pathParts = window.location.pathname.split('/');
+        const agentName = decodeURIComponent(pathParts[pathParts.length - 1]);
+        
+        let agentId = null;
+        let agentData = null;
+        let chatHistory = [];
+
+        function getChatStorageKey() {
+            return `geister_chat_${agentName}`;
+        }
+
+        function saveChatHistory() {
+            try {
+                localStorage.setItem(getChatStorageKey(), JSON.stringify(chatHistory));
+            } catch (e) {
+                console.warn('Failed to save chat history:', e);
+            }
+        }
+
+        function loadChatHistory() {
+            try {
+                const saved = localStorage.getItem(getChatStorageKey());
+                if (saved) {
+                    chatHistory = JSON.parse(saved);
+                    renderChatHistory();
+                }
+            } catch (e) {
+                console.warn('Failed to load chat history:', e);
+                chatHistory = [];
+            }
+        }
+
+        function renderChatHistory() {
+            const container = document.getElementById('chat-messages');
+            if (chatHistory.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-center py-8">Start a conversation with this agent</p>';
+                return;
+            }
+            container.innerHTML = chatHistory.map(msg => {
+                if (msg.role === 'user') {
+                    return `<div class="chat-bubble chat-bubble-user rounded-xl px-4 py-2 text-white">${escapeHtml(msg.content)}</div>`;
+                } else {
+                    const renderedReply = marked.parse(msg.content);
+                    const debugHtml = msg.debug_chain ? renderDebugChain(msg.debug_chain, msg.model, msg.duration_ms) : '';
+                    return `<div class="chat-bubble chat-bubble-agent rounded-xl px-4 py-2"><div class="markdown-body">${renderedReply}</div>${debugHtml}</div>`;
+                }
+            }).join('');
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function clearChat() {
+            if (confirm('Clear chat history for this agent?')) {
+                chatHistory = [];
+                saveChatHistory();
+                renderChatHistory();
+            }
+        }
+
+        const personaEmoji = { 'compliant': '🐑', 'watchful': '🦊', 'exploiter': '🦅', 'unknown': '❓' };
+        const personaColors = { 'compliant': 'bg-green-500', 'watchful': 'bg-yellow-500', 'exploiter': 'bg-red-500', 'unknown': 'bg-gray-500' };
+
+        function formatDate(dateStr) {
+            if (!dateStr) return 'Never';
+            const date = new Date(dateStr);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            if (diffDays < 7) return `${diffDays}d ago`;
+            return date.toLocaleDateString();
+        }
+
+        async function loadAgent() {
+            try {
+                // First find the agent by display name
+                const listRes = await fetch(`${API_BASE}/api/agents`);
+                const listData = await listRes.json();
+                if (!listData.success) throw new Error(listData.error);
+                
+                const agent = listData.agents.find(a => 
+                    a.display_name === agentName || a.agent_id === agentName
+                );
+                
+                if (!agent) {
+                    document.getElementById('agent-title').textContent = 'Agent Not Found';
+                    document.getElementById('agent-subtitle').textContent = `No agent named "${agentName}"`;
+                    return;
+                }
+                
+                agentId = agent.agent_id;
+                
+                // Now load full agent details
+                const res = await fetch(`${API_BASE}/api/agents/${agentId}`);
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                
+                agentData = data;
+                const a = data.agent;
+                
+                // Update header
+                document.title = `${a.display_name || agentId} - Geister Swarm`;
+                document.getElementById('agent-title').textContent = `${personaEmoji[a.persona] || '❓'} ${a.display_name || agentId}`;
+                document.getElementById('agent-subtitle').textContent = `${a.persona || 'unknown'} · ${a.total_sessions || 0} sessions`;
+                
+                const badge = document.getElementById('persona-badge');
+                badge.className = `flex items-center gap-2 px-3 py-1 rounded-lg text-sm ${personaColors[a.persona] || 'bg-gray-500'}/20`;
+                badge.innerHTML = `${personaEmoji[a.persona] || '❓'} <span class="capitalize">${a.persona || 'unknown'}</span>`;
+                
+                // Details tab
+                document.getElementById('edit-display-name').value = a.display_name || '';
+                document.getElementById('edit-persona').value = a.persona || 'compliant';
+                document.getElementById('agent-id').textContent = agentId;
+                document.getElementById('agent-principal').textContent = a.principal || 'N/A';
+                document.getElementById('agent-sessions').textContent = a.total_sessions || 0;
+                document.getElementById('agent-created').textContent = formatDate(a.created_at);
+                document.getElementById('agent-last-active').textContent = formatDate(a.last_active_at);
+                
+                const bg = a.metadata || {};
+                document.getElementById('agent-background').innerHTML = Object.entries(bg).map(([k, v]) => 
+                    `<div><span class="text-gray-400 capitalize">${k}:</span> <span class="capitalize">${v}</span></div>`
+                ).join('') || '<span class="text-gray-500">No background data</span>';
+                
+                // Memories tab
+                const memories = data.memories || [];
+                const stats = data.memory_stats || {};
+                
+                document.getElementById('memory-stats').innerHTML = `
+                    <div><span class="text-gray-400">Total:</span> <span class="font-bold">${stats.total || 0}</span></div>
+                    ${Object.entries(stats.action_types || {}).map(([type, count]) => 
+                        `<div><span class="text-gray-400 capitalize">${type}:</span> <span class="font-bold">${count}</span></div>`
+                    ).join('')}
+                `;
+                
+                document.getElementById('memories-list').innerHTML = memories.length ? memories.map(m => `
+                    <div class="bg-gray-700 rounded-lg p-4">
+                        <div class="flex justify-between text-sm mb-2">
+                            <span class="text-geister-400 font-medium">${m.action_type || 'action'}</span>
+                            <span class="text-gray-500">${formatDate(m.created_at)}</span>
+                        </div>
+                        <p>${m.action_summary || ''}</p>
+                        ${m.observations ? `<p class="text-sm text-gray-400 mt-2">${m.observations}</p>` : ''}
+                        ${m.emotional_state ? `<p class="text-xs text-gray-500 mt-1">Feeling: ${m.emotional_state}</p>` : ''}
+                    </div>
+                `).join('') : '<p class="text-gray-500 text-center py-8">No memories recorded</p>';
+                
+            } catch (e) {
+                document.getElementById('agent-title').textContent = 'Error';
+                document.getElementById('agent-subtitle').textContent = e.message;
+            }
+        }
+
+        function switchTab(tab) {
+            ['chat', 'telos', 'details', 'memories'].forEach(t => {
+                document.getElementById(`tab-${t}`).classList.toggle('text-geister-500', t === tab);
+                document.getElementById(`tab-${t}`).classList.toggle('border-b-2', t === tab);
+                document.getElementById(`tab-${t}`).classList.toggle('border-geister-500', t === tab);
+                document.getElementById(`tab-${t}`).classList.toggle('text-gray-400', t !== tab);
+                document.getElementById(`panel-${t}`).classList.toggle('hidden', t !== tab);
+            });
+            if (tab === 'telos') loadTelos();
+        }
+
+        async function saveAgentChanges() {
+            if (!agentId) return;
+            try {
+                const res = await fetch(`${API_BASE}/api/agents/${agentId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        display_name: document.getElementById('edit-display-name').value,
+                        persona: document.getElementById('edit-persona').value
+                    })
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                alert('Agent updated successfully!');
+                loadAgent();
+            } catch (e) {
+                alert('Error saving: ' + e.message);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function renderDebugChain(chain, model, durationMs) {
+            if (!chain || chain.length === 0) return '';
+            
+            const debugId = 'debug-' + Date.now();
+            const durationStr = durationMs ? `${(durationMs / 1000).toFixed(1)}s` : '';
+            const modelStr = model || '';
+            const metaInfo = [modelStr, durationStr].filter(x => x).join(' · ');
+            
+            let html = `
+                <div class="mt-2 text-xs">
+                    <div class="debug-toggle flex items-center gap-1 text-gray-400 hover:text-gray-300" onclick="document.getElementById('${debugId}').classList.toggle('hidden')">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                        <span>Show reasoning (${chain.length} steps)${metaInfo ? ` · <span class="text-gray-500">${metaInfo}</span>` : ''}</span>
+                    </div>
+                    <div id="${debugId}" class="hidden debug-content mt-2 bg-gray-800 rounded-lg p-3">
+            `;
+            
+            for (const item of chain) {
+                if (item.type === 'assistant') {
+                    if (item.content) {
+                        html += `<div class="debug-item debug-thinking"><div class="text-purple-400 font-medium mb-1">💭 Thinking</div><div class="text-gray-300 whitespace-pre-wrap">${escapeHtml(item.content)}</div></div>`;
+                    }
+                    if (item.tool_calls) {
+                        for (const tc of item.tool_calls) {
+                            html += `<div class="debug-item debug-tool-call"><div class="text-amber-400 font-medium mb-1">🔧 Tool: ${escapeHtml(tc.name)}</div><pre class="text-gray-400 text-xs overflow-x-auto">${escapeHtml(JSON.stringify(tc.arguments, null, 2))}</pre></div>`;
+                        }
+                    }
+                } else if (item.type === 'tool_response') {
+                    const preview = item.content.length > 500 ? item.content.substring(0, 500) + '...' : item.content;
+                    html += `<div class="debug-item debug-tool-response"><div class="text-emerald-400 font-medium mb-1">📥 Tool Response</div><pre class="text-gray-400 text-xs overflow-x-auto max-h-32 overflow-y-auto">${escapeHtml(preview)}</pre></div>`;
+                }
+            }
+            
+            html += '</div></div>';
+            return html;
+        }
+
+        async function sendChat() {
+            if (!agentId) return;
+            const input = document.getElementById('chat-input');
+            const msg = input.value.trim();
+            if (!msg) return;
+            
+            input.value = '';
+            const container = document.getElementById('chat-messages');
+            
+            // Clear placeholder
+            if (container.querySelector('.text-gray-500')) container.innerHTML = '';
+            
+            // Add user message
+            chatHistory.push({ role: 'user', content: msg });
+            saveChatHistory();
+            container.innerHTML += `<div class="chat-bubble chat-bubble-user rounded-xl px-4 py-2 text-white">${escapeHtml(msg)}</div>`;
+            container.scrollTop = container.scrollHeight;
+            
+            // Add loading
+            const loadingId = 'loading-' + Date.now();
+            container.innerHTML += `<div id="${loadingId}" class="chat-bubble chat-bubble-agent rounded-xl px-4 py-2"><span class="animate-pulse">Thinking...</span></div>`;
+            container.scrollTop = container.scrollHeight;
+            
+            try {
+                document.getElementById('chat-send-btn').disabled = true;
+                const agent = agentData?.agent || {};
+                const res = await fetch(`${API_BASE}/api/ask`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        question: msg,
+                        agent_id: agentId,
+                        agent_name: agent.display_name,
+                        agent_background: agent.metadata,
+                        persona: agent.persona
+                    })
+                });
+                const data = await res.json();
+                document.getElementById(loadingId).remove();
+                
+                const reply = data.response || data.answer || data.error || 'No response';
+                chatHistory.push({ role: 'assistant', content: reply, debug_chain: data.debug_chain, model: data.model, duration_ms: data.duration_ms });
+                saveChatHistory();
+                const renderedReply = marked.parse(reply);
+                const debugHtml = renderDebugChain(data.debug_chain, data.model, data.duration_ms);
+                
+                container.innerHTML += `<div class="chat-bubble chat-bubble-agent rounded-xl px-4 py-2"><div class="markdown-body">${renderedReply}</div>${debugHtml}</div>`;
+                container.scrollTop = container.scrollHeight;
+            } catch (e) {
+                document.getElementById(loadingId).innerHTML = `<span class="text-red-400">Error: ${e.message}</span>`;
+            } finally {
+                document.getElementById('chat-send-btn').disabled = false;
+                document.getElementById('chat-input').focus();
+            }
+        }
+
+        // ===================
+        // Telos Functions
+        // ===================
+        
+        let telosTemplates = [];
+        let currentTelos = null;
+
+        async function loadTelos() {
+            if (!agentId) return;
+            
+            try {
+                // Load templates
+                const templatesRes = await fetch(`${API_BASE}/api/telos/templates`);
+                const templatesData = await templatesRes.json();
+                if (templatesData.success) {
+                    telosTemplates = templatesData.templates || [];
+                    const select = document.getElementById('telos-template-select');
+                    select.innerHTML = '<option value="">-- Select a template --</option>' + 
+                        telosTemplates.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+                }
+                
+                // Load agent's current telos
+                const telosRes = await fetch(`${API_BASE}/api/agents/${agentId}/telos`);
+                const telosData = await telosRes.json();
+                currentTelos = telosData.telos;
+                
+                renderCurrentTelos();
+            } catch (e) {
+                console.error('Error loading telos:', e);
+            }
+        }
+
+        function renderCurrentTelos() {
+            const stateLabel = document.getElementById('telos-state-label');
+            const stateBtn = document.getElementById('telos-state-btn');
+            const display = document.getElementById('current-telos-display');
+            const progressSection = document.getElementById('telos-progress-section');
+            const progressDiv = document.getElementById('telos-progress');
+            
+            if (!currentTelos) {
+                stateLabel.textContent = 'No telos';
+                stateLabel.className = 'text-sm px-3 py-1 rounded-full bg-gray-600';
+                stateBtn.disabled = true;
+                stateBtn.textContent = 'Start';
+                display.innerHTML = '<p class="text-gray-400">No telos assigned</p>';
+                progressSection.classList.add('hidden');
+                return;
+            }
+            
+            // State
+            const state = currentTelos.state || 'idle';
+            const stateColors = {
+                'idle': 'bg-gray-600',
+                'active': 'bg-green-600',
+                'completed': 'bg-blue-600',
+                'failed': 'bg-red-600'
+            };
+            stateLabel.textContent = state.charAt(0).toUpperCase() + state.slice(1);
+            stateLabel.className = `text-sm px-3 py-1 rounded-full ${stateColors[state] || 'bg-gray-600'}`;
+            stateBtn.disabled = false;
+            stateBtn.textContent = state === 'active' ? 'Pause' : 'Start';
+            stateBtn.className = state === 'active' 
+                ? 'px-4 py-2 rounded-lg bg-yellow-600 hover:bg-yellow-700'
+                : 'px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700';
+            
+            // Telos content
+            let steps = [];
+            let telosName = 'Custom Telos';
+            
+            if (currentTelos.template_steps) {
+                steps = currentTelos.template_steps;
+                telosName = currentTelos.template_name || 'Template';
+            } else if (currentTelos.custom_telos) {
+                steps = currentTelos.custom_telos.split('\n').filter(s => s.trim());
+                telosName = 'Custom Telos';
+            }
+            
+            const currentStep = currentTelos.current_step || 0;
+            const stepResults = currentTelos.step_results || {};
+            
+            let stepsHtml = steps.map((step, i) => {
+                const result = stepResults[i] || stepResults[String(i)];
+                const isCurrent = i === currentStep;
+                const isDone = result?.status === 'completed';
+                const isFailed = result?.status === 'failed';
+                const hasResult = result?.result || result?.error;
+                
+                let statusIcon = '○';
+                let statusClass = 'text-gray-500';
+                if (isDone) { statusIcon = '✓'; statusClass = 'text-green-400'; }
+                else if (isFailed) { statusIcon = '✗'; statusClass = 'text-red-400'; }
+                else if (isCurrent) { statusIcon = '▶'; statusClass = 'text-yellow-400'; }
+                
+                const stepId = 'step-result-' + i;
+                let html = '<div class="rounded ' + (isCurrent ? 'bg-gray-600/50 -mx-2 px-2 py-1' : '') + '">';
+                html += '<div class="flex items-start gap-2 ' + (hasResult ? 'cursor-pointer hover:text-white' : '') + '"';
+                if (hasResult) html += ' onclick="document.getElementById(\'' + stepId + '\').classList.toggle(\'hidden\')"';
+                html += '>';
+                html += '<span class="' + statusClass + '">' + statusIcon + '</span>';
+                html += '<span class="' + (isDone ? 'text-gray-400' : '') + '">' + step + '</span>';
+                if (hasResult) html += '<span class="text-xs text-gray-500 ml-auto">▼ details</span>';
+                html += '</div>';
+                if (hasResult) {
+                    html += '<div id="' + stepId + '" class="hidden ml-6 mt-2 p-2 bg-gray-800 rounded text-xs text-gray-300 max-h-40 overflow-y-auto">';
+                    html += '<pre class="whitespace-pre-wrap">' + escapeHtml(result.result || result.error || '') + '</pre>';
+                    if (result.timestamp) html += '<div class="text-gray-500 mt-1">Completed: ' + new Date(result.timestamp).toLocaleString() + '</div>';
+                    html += '</div>';
+                }
+                html += '</div>';
+                return html;
+            }).join('');
+            
+            display.innerHTML = `
+                <div class="flex justify-between items-center mb-3">
+                    <span class="font-medium">${telosName}</span>
+                    <span class="text-sm text-gray-400">Step ${currentStep + 1} of ${steps.length}</span>
+                </div>
+                <div class="space-y-2">${stepsHtml}</div>
+            `;
+            
+            progressSection.classList.remove('hidden');
+            progressDiv.innerHTML = `
+                <div class="h-2 bg-gray-700 rounded-full overflow-hidden">
+                    <div class="h-full bg-purple-500 transition-all" style="width: ${Math.round((currentStep / steps.length) * 100)}%"></div>
+                </div>
+                <p class="text-sm text-gray-400">${currentStep} of ${steps.length} steps completed</p>
+            `;
+        }
+
+        function onTemplateSelect() {
+            const select = document.getElementById('telos-template-select');
+            const textarea = document.getElementById('custom-telos-input');
+            const templateId = select.value;
+            
+            if (templateId) {
+                const template = telosTemplates.find(t => t.id == templateId);
+                if (template && template.steps) {
+                    textarea.value = template.steps.join('\n');
+                }
+            }
+        }
+
+        async function toggleTelosState() {
+            if (!agentId || !currentTelos) return;
+            
+            const newState = currentTelos.state === 'active' ? 'idle' : 'active';
+            
+            try {
+                const res = await fetch(`${API_BASE}/api/agents/${agentId}/telos/state`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ state: newState })
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                currentTelos = data.telos;
+                renderCurrentTelos();
+            } catch (e) {
+                alert('Error updating state: ' + e.message);
+            }
+        }
+
+        async function assignTelos() {
+            if (!agentId) return;
+            
+            const templateSelect = document.getElementById('telos-template-select');
+            const customInput = document.getElementById('custom-telos-input');
+            const templateId = templateSelect.value;
+            const customTelos = customInput.value.trim();
+            
+            if (!templateId && !customTelos) {
+                alert('Please select a template or enter custom telos steps');
+                return;
+            }
+            
+            try {
+                const body = templateId ? { template_id: parseInt(templateId) } : { custom_telos: customTelos };
+                const res = await fetch(`${API_BASE}/api/agents/${agentId}/telos`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                
+                currentTelos = data.telos;
+                // Reload to get full template data
+                await loadTelos();
+                alert('Telos assigned successfully!');
+            } catch (e) {
+                alert('Error assigning telos: ' + e.message);
+            }
+        }
+
+        async function removeTelos() {
+            if (!agentId) return;
+            if (!confirm('Remove telos from this agent?')) return;
+            
+            try {
+                const res = await fetch(`${API_BASE}/api/agents/${agentId}/telos`, {
+                    method: 'DELETE'
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                
+                currentTelos = null;
+                renderCurrentTelos();
+                document.getElementById('telos-template-select').value = '';
+                document.getElementById('custom-telos-input').value = '';
+            } catch (e) {
+                alert('Error removing telos: ' + e.message);
+            }
+        }
+
+        // Load on start
+        loadAgent();
+        loadChatHistory();
+    </script>
+</body>
+</html>

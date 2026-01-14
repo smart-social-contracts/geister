@@ -313,6 +313,25 @@ def save_to_conversation(user_principal, realm_principal, question, answer, prom
             persona_name=persona_name or persona_manager.default_persona,
             agent_id=agent_id
         )
+        
+        # Also save to agent memories if this is an agent conversation
+        if agent_id:
+            try:
+                from agent_memory import AgentMemory
+                memory = AgentMemory(agent_id)
+                # Truncate question/answer for summary
+                q_summary = question[:100] + '...' if len(question) > 100 else question
+                a_summary = answer[:200] + '...' if len(answer) > 200 else answer
+                memory.remember(
+                    action_type="conversation",
+                    action_summary=f"Asked: {q_summary}",
+                    action_details={"question": question, "answer": answer},
+                    realm_principal=realm_principal,
+                    observations=a_summary
+                )
+                memory.close()
+            except Exception as mem_err:
+                log(f"Error saving to agent memory: {mem_err}")
     except Exception as e:
         log(f"Error: Could not save conversation to database: {e}")
 
@@ -434,6 +453,9 @@ def ask():
     
     # Send to Ollama using chat API with tools
     try:
+        import time as time_module
+        start_time = time_module.time()
+        
         if stream:
             return Response(stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, actual_persona_name, network, realm_folder, agent_id, verbosity), 
                           mimetype='text/plain')
@@ -496,11 +518,50 @@ def ask():
             # Save to conversation history with persona and agent info
             save_to_conversation(user_principal, realm_principal, question, answer, prompt, actual_persona_name, agent_id)
             
+            # Build debug chain for frontend
+            debug_chain = []
+            try:
+                for msg in messages[2:]:  # Skip system and initial user message
+                    role = msg.get('role', 'unknown')
+                    if role == 'assistant':
+                        chain_item = {'type': 'assistant', 'content': msg.get('content', '') or ''}
+                        if msg.get('tool_calls'):
+                            tool_calls_list = []
+                            for tc in msg.get('tool_calls', []):
+                                args = tc.get('function', {}).get('arguments', {})
+                                # Ensure arguments is a dict, not a string
+                                if isinstance(args, str):
+                                    try:
+                                        args = json.loads(args)
+                                    except:
+                                        args = {'raw': args}
+                                tool_calls_list.append({
+                                    'name': tc.get('function', {}).get('name', 'unknown'),
+                                    'arguments': args
+                                })
+                            chain_item['tool_calls'] = tool_calls_list
+                        debug_chain.append(chain_item)
+                    elif role == 'tool':
+                        content = msg.get('content', '') or ''
+                        # Truncate very long tool responses
+                        if len(content) > 2000:
+                            content = content[:2000] + '... (truncated)'
+                        debug_chain.append({'type': 'tool_response', 'content': content})
+            except Exception as debug_err:
+                log(f"Error building debug chain: {debug_err}")
+                debug_chain = []
+            
+            duration_ms = int((time_module.time() - start_time) * 1000)
+            
             return jsonify({
                 "success": True,
                 "answer": answer,
                 "persona_used": actual_persona_name,
-                "tools_used": tools_used
+                "tools_used": tools_used,
+                "iterations": iteration,
+                "debug_chain": debug_chain,
+                "model": DEFAULT_LLM_MODEL,
+                "duration_ms": duration_ms
             })
     except Exception as e:
         log(f"Error: {traceback.format_exc()}")
@@ -891,6 +952,147 @@ def list_agents():
         log(f"Error listing agents: {traceback.format_exc()}")
         return jsonify({"error": str(e), "agents": []}), 500
 
+
+@app.route('/api/agents/<agent_id>', methods=['GET'])
+def get_agent(agent_id):
+    """Get detailed agent profile including memories"""
+    update_activity()
+    
+    try:
+        from agent_memory import AgentMemory
+        memory = AgentMemory(agent_id)
+        profile = memory.get_profile()
+        
+        if not profile:
+            memory.close()
+            return jsonify({"error": f"Agent '{agent_id}' not found"}), 404
+        
+        # Get recent memories
+        memories = memory.recall_recent(limit=20)
+        memory_stats = memory.get_memory_summary()
+        memory.close()
+        
+        # Parse metadata if it's a string
+        metadata = profile.get('metadata', {})
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except:
+                metadata = {}
+        
+        return jsonify({
+            "success": True,
+            "agent": {
+                "agent_id": profile.get('agent_id'),
+                "principal": profile.get('principal'),
+                "display_name": profile.get('display_name'),
+                "persona": profile.get('persona'),
+                "total_sessions": profile.get('total_sessions'),
+                "created_at": str(profile.get('created_at')) if profile.get('created_at') else None,
+                "last_active_at": str(profile.get('last_active_at')) if profile.get('last_active_at') else None,
+                "metadata": metadata
+            },
+            "memories": memories,
+            "memory_stats": memory_stats
+        })
+    except Exception as e:
+        log(f"Error getting agent {agent_id}: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/agents/<agent_id>', methods=['PUT'])
+def update_agent(agent_id):
+    """Update agent profile (display_name, persona, metadata)"""
+    update_activity()
+    
+    data = request.json
+    
+    try:
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        
+        conn = psycopg2.connect(
+            host=os.getenv('DB_HOST', 'localhost'),
+            database=os.getenv('DB_NAME', 'geister_db'),
+            user=os.getenv('DB_USER', 'geister_user'),
+            password=os.getenv('DB_PASS', 'geister_pass'),
+            port=os.getenv('DB_PORT', '5432')
+        )
+        
+        updates = []
+        params = []
+        
+        if 'display_name' in data:
+            updates.append("display_name = %s")
+            params.append(data['display_name'])
+        
+        if 'persona' in data:
+            updates.append("persona = %s")
+            params.append(data['persona'])
+        
+        if 'metadata' in data:
+            updates.append("metadata = %s")
+            params.append(json.dumps(data['metadata']))
+        
+        if not updates:
+            conn.close()
+            return jsonify({"error": "No fields to update"}), 400
+        
+        params.append(agent_id)
+        
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute(
+                f"UPDATE agent_profiles SET {', '.join(updates)} WHERE agent_id = %s RETURNING *",
+                params
+            )
+            profile = cursor.fetchone()
+            conn.commit()
+        
+        conn.close()
+        
+        if not profile:
+            return jsonify({"error": f"Agent '{agent_id}' not found"}), 404
+        
+        return jsonify({
+            "success": True,
+            "agent": dict(profile)
+        })
+    except Exception as e:
+        log(f"Error updating agent {agent_id}: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/swarm/recreate', methods=['POST'])
+def recreate_swarm():
+    """Recreate the agent swarm (generate new agents)"""
+    update_activity()
+    
+    data = request.json or {}
+    count = data.get('count', 5)
+    start_index = data.get('start_index', 1)
+    persona = data.get('persona', 'compliant')
+    
+    try:
+        from agent_swarm import cmd_generate
+        
+        # Run in background thread to not block
+        import threading
+        
+        def run_generate():
+            cmd_generate(count, start_index, persona)
+        
+        thread = threading.Thread(target=run_generate)
+        thread.start()
+        
+        return jsonify({
+            "success": True,
+            "message": f"Started generating {count} agents starting from index {start_index} with persona '{persona}'"
+        })
+    except Exception as e:
+        log(f"Error recreating swarm: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/personas', methods=['GET'])
 def list_personas():
     """List all available personas"""
@@ -913,11 +1115,16 @@ def get_persona(persona_name):
     update_activity()
     
     try:
-        content = persona_manager.load_persona(persona_name)
+        content = persona_manager.get_persona_content(persona_name)
         if content is None:
             return jsonify({"error": f"Persona '{persona_name}' not found"}), 404
         
-        validation = persona_manager.validate_persona(persona_name)
+        # Basic validation info
+        validation = {
+            "valid": True,
+            "character_count": len(content),
+            "word_count": len(content.split())
+        }
         
         return jsonify({
             "success": True,
@@ -1062,12 +1269,365 @@ def get_logs():
         return f"Error reading logs: {e}", 500, {'Content-Type': 'text/plain'}
 
 
+# =============================================================================
+# Telos Management API
+# =============================================================================
+
+@app.route('/api/telos/templates', methods=['GET'])
+def list_telos_templates_api():
+    """List all telos templates."""
+    update_activity()
+    try:
+        from agent_memory import list_telos_templates
+        templates = list_telos_templates()
+        return jsonify({"success": True, "templates": templates})
+    except Exception as e:
+        log(f"Error listing telos templates: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/telos/templates', methods=['POST'])
+def create_telos_template_api():
+    """Create a new telos template."""
+    update_activity()
+    try:
+        from agent_memory import create_telos_template
+        data = request.json
+        name = data.get('name')
+        description = data.get('description', '')
+        steps = data.get('steps', [])
+        
+        if not name:
+            return jsonify({"error": "Name is required"}), 400
+        if not steps or not isinstance(steps, list):
+            return jsonify({"error": "Steps must be a non-empty list"}), 400
+        
+        template = create_telos_template(name, description, steps)
+        return jsonify({"success": True, "template": template})
+    except Exception as e:
+        log(f"Error creating telos template: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/telos/templates/<int:template_id>', methods=['GET'])
+def get_telos_template_api(template_id):
+    """Get a specific telos template."""
+    update_activity()
+    try:
+        from agent_memory import get_telos_template
+        template = get_telos_template(template_id)
+        if not template:
+            return jsonify({"error": "Template not found"}), 404
+        return jsonify({"success": True, "template": template})
+    except Exception as e:
+        log(f"Error getting telos template: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/telos/templates/<int:template_id>', methods=['PUT'])
+def update_telos_template_api(template_id):
+    """Update a telos template."""
+    update_activity()
+    try:
+        from agent_memory import update_telos_template
+        data = request.json
+        template = update_telos_template(
+            template_id,
+            name=data.get('name'),
+            description=data.get('description'),
+            steps=data.get('steps')
+        )
+        if not template:
+            return jsonify({"error": "Template not found"}), 404
+        return jsonify({"success": True, "template": template})
+    except Exception as e:
+        log(f"Error updating telos template: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/telos/templates/<int:template_id>', methods=['DELETE'])
+def delete_telos_template_api(template_id):
+    """Delete a telos template."""
+    update_activity()
+    try:
+        from agent_memory import delete_telos_template
+        success = delete_telos_template(template_id)
+        if not success:
+            return jsonify({"error": "Template not found"}), 404
+        return jsonify({"success": True})
+    except Exception as e:
+        log(f"Error deleting telos template: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/telos/templates/<int:template_id>/set-default', methods=['POST'])
+def set_default_template_api(template_id):
+    """Set a template as the default."""
+    update_activity()
+    try:
+        from agent_memory import set_default_template
+        template = set_default_template(template_id)
+        if not template:
+            return jsonify({"error": "Template not found"}), 404
+        return jsonify({"success": True, "template": template})
+    except Exception as e:
+        log(f"Error setting default template: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/telos/default', methods=['GET'])
+def get_default_template_api():
+    """Get the default telos template."""
+    update_activity()
+    try:
+        from agent_memory import get_default_template
+        template = get_default_template()
+        return jsonify({"success": True, "template": template})
+    except Exception as e:
+        log(f"Error getting default template: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/telos/assign-default-to-all', methods=['POST'])
+def assign_default_to_all_api():
+    """Assign the default telos template to all agents that don't have a telos."""
+    update_activity()
+    try:
+        from agent_memory import get_default_template, assign_agent_telos, list_all_agents
+        
+        default_template = get_default_template()
+        if not default_template:
+            return jsonify({"error": "No default template set"}), 400
+        
+        agents = list_all_agents()
+        assigned_count = 0
+        
+        for agent in agents:
+            if not agent.get('telos_state'):  # No telos assigned
+                assign_agent_telos(agent['agent_id'], template_id=default_template['id'])
+                assigned_count += 1
+        
+        return jsonify({
+            "success": True, 
+            "assigned_count": assigned_count,
+            "template_name": default_template['name']
+        })
+    except Exception as e:
+        log(f"Error assigning default telos: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/agents/<agent_id>/telos', methods=['GET'])
+def get_agent_telos_api(agent_id):
+    """Get an agent's current telos assignment."""
+    update_activity()
+    try:
+        from agent_memory import get_agent_telos
+        telos = get_agent_telos(agent_id)
+        return jsonify({"success": True, "telos": telos})
+    except Exception as e:
+        log(f"Error getting agent telos: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/agents/<agent_id>/telos', methods=['PUT'])
+def assign_agent_telos_api(agent_id):
+    """Assign a telos to an agent."""
+    update_activity()
+    try:
+        from agent_memory import assign_telos_to_agent
+        data = request.json
+        template_id = data.get('template_id')
+        custom_telos = data.get('custom_telos')
+        
+        if not template_id and not custom_telos:
+            return jsonify({"error": "Either template_id or custom_telos is required"}), 400
+        
+        telos = assign_telos_to_agent(agent_id, template_id=template_id, custom_telos=custom_telos)
+        return jsonify({"success": True, "telos": telos})
+    except Exception as e:
+        log(f"Error assigning agent telos: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/agents/<agent_id>/telos', methods=['DELETE'])
+def remove_agent_telos_api(agent_id):
+    """Remove an agent's telos assignment."""
+    update_activity()
+    try:
+        from agent_memory import remove_agent_telos
+        success = remove_agent_telos(agent_id)
+        return jsonify({"success": True, "removed": success})
+    except Exception as e:
+        log(f"Error removing agent telos: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/agents/<agent_id>/telos/state', methods=['PUT'])
+def update_agent_telos_state_api(agent_id):
+    """Update an agent's telos state (idle, active, completed, failed)."""
+    update_activity()
+    try:
+        from agent_memory import update_agent_telos_state
+        data = request.json
+        state = data.get('state')
+        
+        if state not in ('idle', 'active', 'completed', 'failed'):
+            return jsonify({"error": "State must be one of: idle, active, completed, failed"}), 400
+        
+        telos = update_agent_telos_state(agent_id, state)
+        if not telos:
+            return jsonify({"error": "No telos assigned to this agent"}), 404
+        return jsonify({"success": True, "telos": telos})
+    except Exception as e:
+        log(f"Error updating agent telos state: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/agents/<agent_id>/telos/progress', methods=['PUT'])
+def update_agent_telos_progress_api(agent_id):
+    """Update an agent's telos progress."""
+    update_activity()
+    try:
+        from agent_memory import update_agent_telos_progress
+        data = request.json
+        current_step = data.get('current_step')
+        step_result = data.get('step_result')
+        
+        if current_step is None:
+            return jsonify({"error": "current_step is required"}), 400
+        
+        telos = update_agent_telos_progress(agent_id, current_step, step_result)
+        if not telos:
+            return jsonify({"error": "No telos assigned to this agent"}), 404
+        return jsonify({"success": True, "telos": telos})
+    except Exception as e:
+        log(f"Error updating agent telos progress: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/agents/telos/state', methods=['PUT'])
+def update_all_agents_telos_state_api():
+    """Update all agents' telos state at once."""
+    update_activity()
+    try:
+        from agent_memory import update_all_agents_telos_state
+        data = request.json
+        state = data.get('state')
+        
+        if state not in ('idle', 'active', 'completed', 'failed'):
+            return jsonify({"error": "State must be one of: idle, active, completed, failed"}), 400
+        
+        count = update_all_agents_telos_state(state)
+        return jsonify({"success": True, "updated_count": count})
+    except Exception as e:
+        log(f"Error updating all agents telos state: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/dashboard')
+def dashboard():
+    """Serve the swarm status dashboard"""
+    return app.send_static_file('swarm-dashboard.html')
+
+
+@app.route('/dashboard/agent/<agent_name>')
+def agent_page(agent_name):
+    """Serve the agent detail page"""
+    return app.send_static_file('agent.html')
+
+
+@app.route('/dashboard/persona/<persona_name>')
+def persona_page(persona_name):
+    """Serve the persona detail page"""
+    return app.send_static_file('persona.html')
+
+
+# Configure static folder
+app.static_folder = str(Path(__file__).parent / 'static')
+
+
+# =============================================================================
+# Telos Executor API Endpoints
+# =============================================================================
+
+@app.route('/api/telos/executor/status', methods=['GET'])
+def get_executor_status_api():
+    """Get the telos executor status."""
+    update_activity()
+    try:
+        from telos_executor import get_executor_status, get_execution_log
+        status = get_executor_status()
+        status['recent_log'] = get_execution_log(limit=20)
+        return jsonify({"success": True, **status})
+    except Exception as e:
+        log(f"Error getting executor status: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/telos/executor/start', methods=['POST'])
+def start_executor_api():
+    """Start the telos executor."""
+    update_activity()
+    try:
+        from telos_executor import start_executor, is_executor_running
+        if is_executor_running():
+            return jsonify({"success": True, "message": "Executor already running"})
+        start_executor()
+        return jsonify({"success": True, "message": "Executor started"})
+    except Exception as e:
+        log(f"Error starting executor: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/telos/executor/stop', methods=['POST'])
+def stop_executor_api():
+    """Stop the telos executor."""
+    update_activity()
+    try:
+        from telos_executor import stop_executor, is_executor_running
+        if not is_executor_running():
+            return jsonify({"success": True, "message": "Executor not running"})
+        stop_executor()
+        return jsonify({"success": True, "message": "Executor stopped"})
+    except Exception as e:
+        log(f"Error stopping executor: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/telos/executor/log', methods=['GET'])
+def get_executor_log_api():
+    """Get the telos executor execution log."""
+    update_activity()
+    try:
+        from telos_executor import get_execution_log
+        limit = request.args.get('limit', 50, type=int)
+        log_entries = get_execution_log(limit=limit)
+        return jsonify({"success": True, "log": log_entries})
+    except Exception as e:
+        log(f"Error getting executor log: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == '__main__':
     # Start inactivity monitoring if enabled
     start_inactivity_monitor()
+    
+    # Auto-start telos executor
+    try:
+        from telos_executor import start_executor
+        start_executor()
+        log("Telos executor auto-started")
+    except Exception as e:
+        log(f"Warning: Could not auto-start telos executor: {e}")
     
     try:
         app.run(host='0.0.0.0', port=5000, threaded=True)
     finally:
         # Ensure cleanup on exit
         stop_inactivity_monitor()
+        try:
+            from telos_executor import stop_executor
+            stop_executor()
+        except:
+            pass
