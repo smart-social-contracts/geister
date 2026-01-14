@@ -11,14 +11,21 @@
             theme: {
                 extend: {
                     colors: {
-                        'geister': {
-                            50: '#f0f9ff',
-                            100: '#e0f2fe',
-                            500: '#0ea5e9',
-                            600: '#0284c7',
-                            700: '#0369a1',
-                            900: '#0c4a6e'
+                        'primary': {
+                            50: '#FAFAFA',
+                            100: '#F5F5F5',
+                            200: '#E5E5E5',
+                            300: '#D4D4D4',
+                            400: '#A3A3A3',
+                            500: '#737373',
+                            600: '#525252',
+                            700: '#404040',
+                            800: '#262626',
+                            900: '#171717'
                         }
+                    },
+                    fontFamily: {
+                        sans: ['Helvetica Neue', 'Helvetica', 'Arial', 'ui-sans-serif', 'system-ui', 'sans-serif']
                     }
                 }
             }
@@ -28,16 +35,16 @@
         .chat-container { height: calc(100vh - 280px); min-height: 300px; }
         @media (max-width: 640px) { .chat-container { height: calc(100vh - 320px); } }
         .chat-bubble { max-width: 85%; }
-        .chat-bubble-user { background: #0ea5e9; margin-left: auto; }
-        .chat-bubble-agent { background: #374151; margin-right: auto; }
+        .chat-bubble-user { background: #262626; color: white; margin-left: auto; }
+        .chat-bubble-agent { background: #F5F5F5; color: #171717; margin-right: auto; }
         /* Markdown styles */
         .markdown-body { line-height: 1.6; }
         .markdown-body p { margin-bottom: 0.5rem; }
         .markdown-body p:last-child { margin-bottom: 0; }
-        .markdown-body strong { font-weight: 600; color: #fff; }
+        .markdown-body strong { font-weight: 600; }
         .markdown-body em { font-style: italic; }
-        .markdown-body code { background: #1f2937; padding: 0.125rem 0.375rem; border-radius: 0.25rem; font-size: 0.875rem; }
-        .markdown-body pre { background: #1f2937; padding: 0.75rem; border-radius: 0.5rem; overflow-x: auto; margin: 0.5rem 0; }
+        .markdown-body code { background: #E5E5E5; padding: 0.125rem 0.375rem; border-radius: 0.25rem; font-size: 0.875rem; }
+        .markdown-body pre { background: #F5F5F5; padding: 0.75rem; border-radius: 0.5rem; overflow-x: auto; margin: 0.5rem 0; border: 1px solid #E5E5E5; }
         .markdown-body pre code { background: none; padding: 0; }
         .markdown-body ul, .markdown-body ol { margin: 0.5rem 0; padding-left: 1.5rem; }
         .markdown-body li { margin: 0.25rem 0; }
@@ -45,9 +52,9 @@
         .markdown-body h1 { font-size: 1.25rem; }
         .markdown-body h2 { font-size: 1.125rem; }
         .markdown-body h3 { font-size: 1rem; }
-        .markdown-body blockquote { border-left: 3px solid #4b5563; padding-left: 0.75rem; margin: 0.5rem 0; color: #9ca3af; }
-        .markdown-body a { color: #38bdf8; text-decoration: underline; }
-        .markdown-body hr { border-color: #4b5563; margin: 0.75rem 0; }
+        .markdown-body blockquote { border-left: 3px solid #D4D4D4; padding-left: 0.75rem; margin: 0.5rem 0; color: #737373; }
+        .markdown-body a { color: #525252; text-decoration: underline; }
+        .markdown-body hr { border-color: #E5E5E5; margin: 0.75rem 0; }
         /* Debug dropdown */
         .debug-toggle { cursor: pointer; user-select: none; }
         .debug-content { max-height: 400px; overflow-y: auto; }
@@ -57,59 +64,59 @@
         .debug-tool-response { border-color: #10b981; }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-100 min-h-screen">
+<body class="bg-white text-primary-900 min-h-screen font-sans">
     <!-- Header -->
-    <header class="bg-gray-800 border-b border-gray-700">
+    <header class="bg-primary-900 border-b border-primary-800">
         <div class="max-w-5xl mx-auto px-4 py-4 sm:px-6">
             <div class="flex items-center gap-4">
-                <a href="/dashboard" class="text-gray-400 hover:text-white">
+                <a href="/dashboard" class="text-primary-400 hover:text-white">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
                 </a>
                 <div class="flex-1">
-                    <h1 class="text-xl sm:text-2xl font-bold" id="agent-title">Loading...</h1>
-                    <p class="text-sm text-gray-400" id="agent-subtitle"></p>
+                    <h1 class="text-xl sm:text-2xl font-bold text-white" id="agent-title">Loading...</h1>
+                    <p class="text-sm text-primary-400" id="agent-subtitle"></p>
                 </div>
-                <div id="persona-badge" class="hidden sm:flex items-center gap-2 px-3 py-1 rounded-lg text-sm"></div>
+                <div id="persona-badge" class="hidden sm:flex items-center gap-2 px-3 py-1 rounded text-sm"></div>
             </div>
         </div>
     </header>
 
     <main class="max-w-5xl mx-auto px-4 py-6 sm:px-6">
         <!-- Tabs -->
-        <div class="flex border-b border-gray-700 mb-6">
-            <button onclick="switchTab('chat')" id="tab-chat" class="px-4 py-2 text-geister-500 border-b-2 border-geister-500 font-medium">Chat</button>
-            <button onclick="switchTab('telos')" id="tab-telos" class="px-4 py-2 text-gray-400 hover:text-white">Telos</button>
-            <button onclick="switchTab('details')" id="tab-details" class="px-4 py-2 text-gray-400 hover:text-white">Details</button>
-            <button onclick="switchTab('memories')" id="tab-memories" class="px-4 py-2 text-gray-400 hover:text-white">Memories</button>
+        <div class="flex border-b border-primary-200 mb-6">
+            <button onclick="switchTab('chat')" id="tab-chat" class="px-4 py-2 text-primary-900 border-b-2 border-primary-900 font-medium">Chat</button>
+            <button onclick="switchTab('telos')" id="tab-telos" class="px-4 py-2 text-primary-500 hover:text-primary-700">Telos</button>
+            <button onclick="switchTab('details')" id="tab-details" class="px-4 py-2 text-primary-500 hover:text-primary-700">Details</button>
+            <button onclick="switchTab('memories')" id="tab-memories" class="px-4 py-2 text-primary-500 hover:text-primary-700">Memories</button>
         </div>
 
         <!-- Chat Tab -->
         <div id="panel-chat">
             <div class="flex justify-end mb-2">
-                <button onclick="clearChat()" class="text-xs text-gray-500 hover:text-gray-300">Clear chat</button>
+                <button onclick="clearChat()" class="text-xs text-primary-500 hover:text-primary-700">Clear chat</button>
             </div>
-            <div id="chat-messages" class="chat-container overflow-y-auto space-y-3 bg-gray-800 rounded-xl p-4 mb-4">
-                <p class="text-gray-500 text-center py-8">Start a conversation with this agent</p>
+            <div id="chat-messages" class="chat-container overflow-y-auto space-y-3 bg-primary-50 border border-primary-200 rounded-lg p-4 mb-4">
+                <p class="text-primary-500 text-center py-8">Start a conversation with this agent</p>
             </div>
             <div class="flex gap-2">
                 <input type="text" id="chat-input" placeholder="Type a message..." 
-                    class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 focus:outline-none focus:border-geister-500" 
+                    class="flex-1 bg-primary-50 border border-primary-200 rounded px-4 py-3 focus:outline-none focus:border-primary-400 text-primary-900" 
                     onkeypress="if(event.key==='Enter')sendChat()">
-                <button onclick="sendChat()" id="chat-send-btn" class="bg-geister-600 hover:bg-geister-700 px-6 py-3 rounded-xl font-medium">Send</button>
+                <button onclick="sendChat()" id="chat-send-btn" class="bg-primary-800 hover:bg-primary-700 text-white px-6 py-3 rounded font-medium">Send</button>
             </div>
         </div>
 
         <!-- Details Tab -->
         <div id="panel-details" class="hidden">
-            <div class="bg-gray-800 rounded-xl p-6 space-y-6">
+            <div class="bg-primary-50 border border-primary-200 rounded-lg p-6 space-y-6">
                 <div class="grid sm:grid-cols-2 gap-4">
                     <div>
-                        <label class="text-sm text-gray-400">Display Name</label>
-                        <input type="text" id="edit-display-name" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 mt-1">
+                        <label class="text-sm text-primary-500">Display Name</label>
+                        <input type="text" id="edit-display-name" class="w-full bg-white border border-primary-200 rounded px-4 py-3 mt-1 text-primary-900">
                     </div>
                     <div>
-                        <label class="text-sm text-gray-400">Persona</label>
-                        <select id="edit-persona" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 mt-1">
+                        <label class="text-sm text-primary-500">Persona</label>
+                        <select id="edit-persona" class="w-full bg-white border border-primary-200 rounded px-4 py-3 mt-1 text-primary-900">
                             <option value="compliant">Compliant</option>
                             <option value="watchful">Watchful</option>
                             <option value="exploiter">Exploiter</option>
@@ -118,51 +125,51 @@
                 </div>
                 
                 <div>
-                    <label class="text-sm text-gray-400">Agent ID</label>
-                    <p id="agent-id" class="font-mono text-sm bg-gray-700 rounded-lg px-4 py-3 mt-1"></p>
+                    <label class="text-sm text-primary-500">Agent ID</label>
+                    <p id="agent-id" class="font-mono text-sm bg-white border border-primary-200 rounded px-4 py-3 mt-1 text-primary-700"></p>
                 </div>
                 
                 <div>
-                    <label class="text-sm text-gray-400">Principal</label>
-                    <p id="agent-principal" class="font-mono text-sm bg-gray-700 rounded-lg px-4 py-3 mt-1 break-all"></p>
+                    <label class="text-sm text-primary-500">Principal</label>
+                    <p id="agent-principal" class="font-mono text-sm bg-white border border-primary-200 rounded px-4 py-3 mt-1 break-all text-primary-700"></p>
                 </div>
                 
                 <div>
-                    <label class="text-sm text-gray-400">Background</label>
-                    <div id="agent-background" class="bg-gray-700 rounded-lg px-4 py-3 mt-1 grid sm:grid-cols-2 gap-2 text-sm"></div>
+                    <label class="text-sm text-primary-500">Background</label>
+                    <div id="agent-background" class="bg-white border border-primary-200 rounded px-4 py-3 mt-1 grid sm:grid-cols-2 gap-2 text-sm text-primary-700"></div>
                 </div>
                 
                 <div class="grid sm:grid-cols-3 gap-4 text-sm">
-                    <div class="bg-gray-700 rounded-lg p-3">
-                        <span class="text-gray-400 block">Sessions</span>
-                        <span id="agent-sessions" class="text-xl font-bold"></span>
+                    <div class="bg-white border border-primary-200 rounded p-3">
+                        <span class="text-primary-500 block">Sessions</span>
+                        <span id="agent-sessions" class="text-xl font-bold text-primary-900"></span>
                     </div>
-                    <div class="bg-gray-700 rounded-lg p-3">
-                        <span class="text-gray-400 block">Created</span>
-                        <span id="agent-created"></span>
+                    <div class="bg-white border border-primary-200 rounded p-3">
+                        <span class="text-primary-500 block">Created</span>
+                        <span id="agent-created" class="text-primary-900"></span>
                     </div>
-                    <div class="bg-gray-700 rounded-lg p-3">
-                        <span class="text-gray-400 block">Last Active</span>
-                        <span id="agent-last-active"></span>
+                    <div class="bg-white border border-primary-200 rounded p-3">
+                        <span class="text-primary-500 block">Last Active</span>
+                        <span id="agent-last-active" class="text-primary-900"></span>
                     </div>
                 </div>
                 
-                <button onclick="saveAgentChanges()" class="w-full bg-geister-600 hover:bg-geister-700 px-4 py-3 rounded-lg font-medium">Save Changes</button>
+                <button onclick="saveAgentChanges()" class="w-full bg-primary-800 hover:bg-primary-700 text-white px-4 py-3 rounded font-medium">Save Changes</button>
             </div>
         </div>
 
         <!-- Telos Tab -->
         <div id="panel-telos" class="hidden">
-            <div class="bg-gray-800 rounded-xl p-6 space-y-6">
+            <div class="bg-primary-50 border border-primary-200 rounded-lg p-6 space-y-6">
                 <!-- State Toggle -->
                 <div class="flex items-center justify-between">
                     <div>
-                        <h3 class="font-medium">Agent State</h3>
-                        <p class="text-sm text-gray-400">Toggle between idle and active</p>
+                        <h3 class="font-medium text-primary-900">Agent State</h3>
+                        <p class="text-sm text-primary-500">Toggle between idle and active</p>
                     </div>
                     <div class="flex items-center gap-3">
-                        <span id="telos-state-label" class="text-sm px-3 py-1 rounded-full bg-gray-600">No telos</span>
-                        <button onclick="toggleTelosState()" id="telos-state-btn" class="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-50" disabled>
+                        <span id="telos-state-label" class="text-sm px-3 py-1 rounded-full bg-primary-200 text-primary-700">No telos</span>
+                        <button onclick="toggleTelosState()" id="telos-state-btn" class="px-4 py-2 rounded bg-primary-200 hover:bg-primary-300 text-primary-700 disabled:opacity-50" disabled>
                             Start
                         </button>
                     </div>
@@ -170,40 +177,40 @@
 
                 <!-- Current Telos Display -->
                 <div id="current-telos-section">
-                    <h3 class="font-medium mb-3">Current Telos</h3>
-                    <div id="current-telos-display" class="bg-gray-700 rounded-lg p-4">
-                        <p class="text-gray-400">No telos assigned</p>
+                    <h3 class="font-medium mb-3 text-primary-900">Current Telos</h3>
+                    <div id="current-telos-display" class="bg-white border border-primary-200 rounded p-4">
+                        <p class="text-primary-500">No telos assigned</p>
                     </div>
                 </div>
 
                 <!-- Progress -->
                 <div id="telos-progress-section" class="hidden">
-                    <h3 class="font-medium mb-3">Progress</h3>
+                    <h3 class="font-medium mb-3 text-primary-900">Progress</h3>
                     <div id="telos-progress" class="space-y-2"></div>
                 </div>
 
                 <!-- Assign Telos -->
-                <div class="border-t border-gray-700 pt-6">
-                    <h3 class="font-medium mb-3">Assign New Telos</h3>
+                <div class="border-t border-primary-200 pt-6">
+                    <h3 class="font-medium mb-3 text-primary-900">Assign New Telos</h3>
                     
                     <!-- Template Selection -->
                     <div class="mb-4">
-                        <label class="text-sm text-gray-400">From Template</label>
-                        <select id="telos-template-select" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 mt-1" onchange="onTemplateSelect()">
+                        <label class="text-sm text-primary-500">From Template</label>
+                        <select id="telos-template-select" class="w-full bg-white border border-primary-200 rounded px-4 py-3 mt-1 text-primary-900" onchange="onTemplateSelect()">
                             <option value="">-- Select a template --</option>
                         </select>
                     </div>
                     
                     <!-- Or Custom -->
                     <div class="mb-4">
-                        <label class="text-sm text-gray-400">Or Custom Telos (one step per line)</label>
+                        <label class="text-sm text-primary-500">Or Custom Telos (one step per line)</label>
                         <textarea id="custom-telos-input" rows="6" placeholder="Find a realm you like&#10;Join the realm&#10;Set your avatar&#10;Check pending invoices&#10;Vote on proposals&#10;Create a proposal" 
-                            class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 mt-1 font-mono text-sm"></textarea>
+                            class="w-full bg-white border border-primary-200 rounded px-4 py-3 mt-1 font-mono text-sm text-primary-900"></textarea>
                     </div>
                     
                     <div class="flex gap-3">
-                        <button onclick="assignTelos()" class="flex-1 bg-purple-600 hover:bg-purple-700 px-4 py-3 rounded-lg font-medium">Assign Telos</button>
-                        <button onclick="removeTelos()" class="px-4 py-3 rounded-lg bg-red-600/20 text-red-400 hover:bg-red-600/30">Remove</button>
+                        <button onclick="assignTelos()" class="flex-1 bg-primary-800 hover:bg-primary-700 text-white px-4 py-3 rounded font-medium">Assign Telos</button>
+                        <button onclick="removeTelos()" class="px-4 py-3 rounded bg-red-100 text-red-700 hover:bg-red-200">Remove</button>
                     </div>
                 </div>
             </div>
@@ -211,8 +218,8 @@
 
         <!-- Memories Tab -->
         <div id="panel-memories" class="hidden">
-            <div class="bg-gray-800 rounded-xl p-4">
-                <div id="memory-stats" class="mb-4 pb-4 border-b border-gray-700 flex flex-wrap gap-4 text-sm"></div>
+            <div class="bg-primary-50 border border-primary-200 rounded-lg p-4">
+                <div id="memory-stats" class="mb-4 pb-4 border-b border-primary-200 flex flex-wrap gap-4 text-sm"></div>
                 <div id="memories-list" class="space-y-3"></div>
             </div>
         </div>
@@ -255,7 +262,7 @@
         function renderChatHistory() {
             const container = document.getElementById('chat-messages');
             if (chatHistory.length === 0) {
-                container.innerHTML = '<p class="text-gray-500 text-center py-8">Start a conversation with this agent</p>';
+                container.innerHTML = '<p class="text-primary-500 text-center py-8">Start a conversation with this agent</p>';
                 return;
             }
             container.innerHTML = chatHistory.map(msg => {
@@ -279,7 +286,7 @@
         }
 
         const personaEmoji = { 'compliant': '🐑', 'watchful': '🦊', 'exploiter': '🦅', 'unknown': '❓' };
-        const personaColors = { 'compliant': 'bg-green-500', 'watchful': 'bg-yellow-500', 'exploiter': 'bg-red-500', 'unknown': 'bg-gray-500' };
+        const personaColors = { 'compliant': 'bg-green-100 text-green-700', 'watchful': 'bg-yellow-100 text-yellow-700', 'exploiter': 'bg-red-100 text-red-700', 'unknown': 'bg-primary-100 text-primary-700' };
 
         function formatDate(dateStr) {
             if (!dateStr) return 'Never';
@@ -329,7 +336,7 @@
                 document.getElementById('agent-subtitle').textContent = `${a.persona || 'unknown'} · ${a.total_sessions || 0} sessions`;
                 
                 const badge = document.getElementById('persona-badge');
-                badge.className = `flex items-center gap-2 px-3 py-1 rounded-lg text-sm ${personaColors[a.persona] || 'bg-gray-500'}/20`;
+                badge.className = `flex items-center gap-2 px-3 py-1 rounded text-sm ${personaColors[a.persona] || 'bg-primary-100 text-primary-700'}`;
                 badge.innerHTML = `${personaEmoji[a.persona] || '❓'} <span class="capitalize">${a.persona || 'unknown'}</span>`;
                 
                 // Details tab
@@ -343,31 +350,31 @@
                 
                 const bg = a.metadata || {};
                 document.getElementById('agent-background').innerHTML = Object.entries(bg).map(([k, v]) => 
-                    `<div><span class="text-gray-400 capitalize">${k}:</span> <span class="capitalize">${v}</span></div>`
-                ).join('') || '<span class="text-gray-500">No background data</span>';
+                    `<div><span class="text-primary-500 capitalize">${k}:</span> <span class="capitalize">${v}</span></div>`
+                ).join('') || '<span class="text-primary-400">No background data</span>';
                 
                 // Memories tab
                 const memories = data.memories || [];
                 const stats = data.memory_stats || {};
                 
                 document.getElementById('memory-stats').innerHTML = `
-                    <div><span class="text-gray-400">Total:</span> <span class="font-bold">${stats.total || 0}</span></div>
+                    <div><span class="text-primary-500">Total:</span> <span class="font-bold text-primary-900">${stats.total || 0}</span></div>
                     ${Object.entries(stats.action_types || {}).map(([type, count]) => 
-                        `<div><span class="text-gray-400 capitalize">${type}:</span> <span class="font-bold">${count}</span></div>`
+                        `<div><span class="text-primary-500 capitalize">${type}:</span> <span class="font-bold text-primary-900">${count}</span></div>`
                     ).join('')}
                 `;
                 
                 document.getElementById('memories-list').innerHTML = memories.length ? memories.map(m => `
-                    <div class="bg-gray-700 rounded-lg p-4">
+                    <div class="bg-white border border-primary-200 rounded p-4">
                         <div class="flex justify-between text-sm mb-2">
-                            <span class="text-geister-400 font-medium">${m.action_type || 'action'}</span>
-                            <span class="text-gray-500">${formatDate(m.created_at)}</span>
+                            <span class="text-primary-700 font-medium">${m.action_type || 'action'}</span>
+                            <span class="text-primary-400">${formatDate(m.created_at)}</span>
                         </div>
-                        <p>${m.action_summary || ''}</p>
-                        ${m.observations ? `<p class="text-sm text-gray-400 mt-2">${m.observations}</p>` : ''}
-                        ${m.emotional_state ? `<p class="text-xs text-gray-500 mt-1">Feeling: ${m.emotional_state}</p>` : ''}
+                        <p class="text-primary-900">${m.action_summary || ''}</p>
+                        ${m.observations ? `<p class="text-sm text-primary-500 mt-2">${m.observations}</p>` : ''}
+                        ${m.emotional_state ? `<p class="text-xs text-primary-400 mt-1">Feeling: ${m.emotional_state}</p>` : ''}
                     </div>
-                `).join('') : '<p class="text-gray-500 text-center py-8">No memories recorded</p>';
+                `).join('') : '<p class="text-primary-500 text-center py-8">No memories recorded</p>';
                 
             } catch (e) {
                 document.getElementById('agent-title').textContent = 'Error';
@@ -377,10 +384,11 @@
 
         function switchTab(tab) {
             ['chat', 'telos', 'details', 'memories'].forEach(t => {
-                document.getElementById(`tab-${t}`).classList.toggle('text-geister-500', t === tab);
+                document.getElementById(`tab-${t}`).classList.toggle('text-primary-900', t === tab);
                 document.getElementById(`tab-${t}`).classList.toggle('border-b-2', t === tab);
-                document.getElementById(`tab-${t}`).classList.toggle('border-geister-500', t === tab);
-                document.getElementById(`tab-${t}`).classList.toggle('text-gray-400', t !== tab);
+                document.getElementById(`tab-${t}`).classList.toggle('border-primary-900', t === tab);
+                document.getElementById(`tab-${t}`).classList.toggle('font-medium', t === tab);
+                document.getElementById(`tab-${t}`).classList.toggle('text-primary-500', t !== tab);
                 document.getElementById(`panel-${t}`).classList.toggle('hidden', t !== tab);
             });
             if (tab === 'telos') loadTelos();
@@ -422,26 +430,26 @@
             
             let html = `
                 <div class="mt-2 text-xs">
-                    <div class="debug-toggle flex items-center gap-1 text-gray-400 hover:text-gray-300" onclick="document.getElementById('${debugId}').classList.toggle('hidden')">
+                    <div class="debug-toggle flex items-center gap-1 text-primary-500 hover:text-primary-700" onclick="document.getElementById('${debugId}').classList.toggle('hidden')">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                        <span>Show reasoning (${chain.length} steps)${metaInfo ? ` · <span class="text-gray-500">${metaInfo}</span>` : ''}</span>
+                        <span>Show reasoning (${chain.length} steps)${metaInfo ? ` · <span class="text-primary-400">${metaInfo}</span>` : ''}</span>
                     </div>
-                    <div id="${debugId}" class="hidden debug-content mt-2 bg-gray-800 rounded-lg p-3">
+                    <div id="${debugId}" class="hidden debug-content mt-2 bg-primary-100 border border-primary-200 rounded p-3">
             `;
             
             for (const item of chain) {
                 if (item.type === 'assistant') {
                     if (item.content) {
-                        html += `<div class="debug-item debug-thinking"><div class="text-purple-400 font-medium mb-1">💭 Thinking</div><div class="text-gray-300 whitespace-pre-wrap">${escapeHtml(item.content)}</div></div>`;
+                        html += `<div class="debug-item debug-thinking"><div class="text-purple-600 font-medium mb-1">💭 Thinking</div><div class="text-primary-700 whitespace-pre-wrap">${escapeHtml(item.content)}</div></div>`;
                     }
                     if (item.tool_calls) {
                         for (const tc of item.tool_calls) {
-                            html += `<div class="debug-item debug-tool-call"><div class="text-amber-400 font-medium mb-1">🔧 Tool: ${escapeHtml(tc.name)}</div><pre class="text-gray-400 text-xs overflow-x-auto">${escapeHtml(JSON.stringify(tc.arguments, null, 2))}</pre></div>`;
+                            html += `<div class="debug-item debug-tool-call"><div class="text-amber-600 font-medium mb-1">🔧 Tool: ${escapeHtml(tc.name)}</div><pre class="text-primary-600 text-xs overflow-x-auto">${escapeHtml(JSON.stringify(tc.arguments, null, 2))}</pre></div>`;
                         }
                     }
                 } else if (item.type === 'tool_response') {
                     const preview = item.content.length > 500 ? item.content.substring(0, 500) + '...' : item.content;
-                    html += `<div class="debug-item debug-tool-response"><div class="text-emerald-400 font-medium mb-1">📥 Tool Response</div><pre class="text-gray-400 text-xs overflow-x-auto max-h-32 overflow-y-auto">${escapeHtml(preview)}</pre></div>`;
+                    html += `<div class="debug-item debug-tool-response"><div class="text-emerald-600 font-medium mb-1">📥 Tool Response</div><pre class="text-primary-600 text-xs overflow-x-auto max-h-32 overflow-y-auto">${escapeHtml(preview)}</pre></div>`;
                 }
             }
             
@@ -459,7 +467,7 @@
             const container = document.getElementById('chat-messages');
             
             // Clear placeholder
-            if (container.querySelector('.text-gray-500')) container.innerHTML = '';
+            if (container.querySelector('.text-primary-500')) container.innerHTML = '';
             
             // Add user message
             chatHistory.push({ role: 'user', content: msg });
@@ -546,10 +554,10 @@
             
             if (!currentTelos) {
                 stateLabel.textContent = 'No telos';
-                stateLabel.className = 'text-sm px-3 py-1 rounded-full bg-gray-600';
+                stateLabel.className = 'text-sm px-3 py-1 rounded-full bg-primary-200 text-primary-700';
                 stateBtn.disabled = true;
                 stateBtn.textContent = 'Start';
-                display.innerHTML = '<p class="text-gray-400">No telos assigned</p>';
+                display.innerHTML = '<p class="text-primary-500">No telos assigned</p>';
                 progressSection.classList.add('hidden');
                 return;
             }
@@ -557,18 +565,18 @@
             // State
             const state = currentTelos.state || 'idle';
             const stateColors = {
-                'idle': 'bg-gray-600',
-                'active': 'bg-green-600',
-                'completed': 'bg-blue-600',
-                'failed': 'bg-red-600'
+                'idle': 'bg-primary-200 text-primary-700',
+                'active': 'bg-green-100 text-green-700',
+                'completed': 'bg-blue-100 text-blue-700',
+                'failed': 'bg-red-100 text-red-700'
             };
             stateLabel.textContent = state.charAt(0).toUpperCase() + state.slice(1);
-            stateLabel.className = `text-sm px-3 py-1 rounded-full ${stateColors[state] || 'bg-gray-600'}`;
+            stateLabel.className = `text-sm px-3 py-1 rounded-full ${stateColors[state] || 'bg-primary-200 text-primary-700'}`;
             stateBtn.disabled = false;
             stateBtn.textContent = state === 'active' ? 'Pause' : 'Start';
             stateBtn.className = state === 'active' 
-                ? 'px-4 py-2 rounded-lg bg-yellow-600 hover:bg-yellow-700'
-                : 'px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700';
+                ? 'px-4 py-2 rounded bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
+                : 'px-4 py-2 rounded bg-green-100 text-green-700 hover:bg-green-200';
             
             // Telos content
             let steps = [];
@@ -593,24 +601,24 @@
                 const hasResult = result?.result || result?.error;
                 
                 let statusIcon = '○';
-                let statusClass = 'text-gray-500';
-                if (isDone) { statusIcon = '✓'; statusClass = 'text-green-400'; }
-                else if (isFailed) { statusIcon = '✗'; statusClass = 'text-red-400'; }
-                else if (isCurrent) { statusIcon = '▶'; statusClass = 'text-yellow-400'; }
+                let statusClass = 'text-primary-400';
+                if (isDone) { statusIcon = '✓'; statusClass = 'text-green-600'; }
+                else if (isFailed) { statusIcon = '✗'; statusClass = 'text-red-600'; }
+                else if (isCurrent) { statusIcon = '▶'; statusClass = 'text-yellow-600'; }
                 
                 const stepId = 'step-result-' + i;
-                let html = '<div class="rounded ' + (isCurrent ? 'bg-gray-600/50 -mx-2 px-2 py-1' : '') + '">';
-                html += '<div class="flex items-start gap-2 ' + (hasResult ? 'cursor-pointer hover:text-white' : '') + '"';
+                let html = '<div class="rounded ' + (isCurrent ? 'bg-primary-100 -mx-2 px-2 py-1' : '') + '">';
+                html += '<div class="flex items-start gap-2 ' + (hasResult ? 'cursor-pointer hover:text-primary-900' : '') + '"';
                 if (hasResult) html += ' onclick="document.getElementById(\'' + stepId + '\').classList.toggle(\'hidden\')"';
                 html += '>';
                 html += '<span class="' + statusClass + '">' + statusIcon + '</span>';
-                html += '<span class="' + (isDone ? 'text-gray-400' : '') + '">' + step + '</span>';
-                if (hasResult) html += '<span class="text-xs text-gray-500 ml-auto">▼ details</span>';
+                html += '<span class="' + (isDone ? 'text-primary-500' : 'text-primary-900') + '">' + step + '</span>';
+                if (hasResult) html += '<span class="text-xs text-primary-400 ml-auto">▼ details</span>';
                 html += '</div>';
                 if (hasResult) {
-                    html += '<div id="' + stepId + '" class="hidden ml-6 mt-2 p-2 bg-gray-800 rounded text-xs text-gray-300 max-h-40 overflow-y-auto">';
+                    html += '<div id="' + stepId + '" class="hidden ml-6 mt-2 p-2 bg-primary-100 border border-primary-200 rounded text-xs text-primary-700 max-h-40 overflow-y-auto">';
                     html += '<pre class="whitespace-pre-wrap">' + escapeHtml(result.result || result.error || '') + '</pre>';
-                    if (result.timestamp) html += '<div class="text-gray-500 mt-1">Completed: ' + new Date(result.timestamp).toLocaleString() + '</div>';
+                    if (result.timestamp) html += '<div class="text-primary-500 mt-1">Completed: ' + new Date(result.timestamp).toLocaleString() + '</div>';
                     html += '</div>';
                 }
                 html += '</div>';
@@ -619,18 +627,18 @@
             
             display.innerHTML = `
                 <div class="flex justify-between items-center mb-3">
-                    <span class="font-medium">${telosName}</span>
-                    <span class="text-sm text-gray-400">Step ${currentStep + 1} of ${steps.length}</span>
+                    <span class="font-medium text-primary-900">${telosName}</span>
+                    <span class="text-sm text-primary-500">Step ${currentStep + 1} of ${steps.length}</span>
                 </div>
                 <div class="space-y-2">${stepsHtml}</div>
             `;
             
             progressSection.classList.remove('hidden');
             progressDiv.innerHTML = `
-                <div class="h-2 bg-gray-700 rounded-full overflow-hidden">
-                    <div class="h-full bg-purple-500 transition-all" style="width: ${Math.round((currentStep / steps.length) * 100)}%"></div>
+                <div class="h-2 bg-primary-200 rounded-full overflow-hidden">
+                    <div class="h-full bg-primary-600 transition-all" style="width: ${Math.round((currentStep / steps.length) * 100)}%"></div>
                 </div>
-                <p class="text-sm text-gray-400">${currentStep} of ${steps.length} steps completed</p>
+                <p class="text-sm text-primary-500">${currentStep} of ${steps.length} steps completed</p>
             `;
         }
 

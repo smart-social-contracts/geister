@@ -10,14 +10,21 @@
             theme: {
                 extend: {
                     colors: {
-                        'geister': {
-                            50: '#f0f9ff',
-                            100: '#e0f2fe',
-                            500: '#0ea5e9',
-                            600: '#0284c7',
-                            700: '#0369a1',
-                            900: '#0c4a6e'
+                        'primary': {
+                            50: '#FAFAFA',
+                            100: '#F5F5F5',
+                            200: '#E5E5E5',
+                            300: '#D4D4D4',
+                            400: '#A3A3A3',
+                            500: '#737373',
+                            600: '#525252',
+                            700: '#404040',
+                            800: '#262626',
+                            900: '#171717'
                         }
+                    },
+                    fontFamily: {
+                        sans: ['Helvetica Neue', 'Helvetica', 'Arial', 'ui-sans-serif', 'system-ui', 'sans-serif']
                     }
                 }
             }
@@ -27,25 +34,25 @@
         .loading { opacity: 0.5; pointer-events: none; }
         .modal-open { overflow: hidden; }
         .chat-bubble { max-width: 85%; }
-        .chat-bubble-user { background: #0ea5e9; margin-left: auto; }
-        .chat-bubble-agent { background: #374151; margin-right: auto; }
+        .chat-bubble-user { background: #262626; color: white; margin-left: auto; }
+        .chat-bubble-agent { background: #F5F5F5; color: #171717; margin-right: auto; }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-100 min-h-screen">
+<body class="bg-white text-primary-900 min-h-screen font-sans">
     <!-- Header -->
-    <header class="bg-gray-800 border-b border-gray-700 sticky top-0 z-10">
+    <header class="bg-primary-900 border-b border-primary-800 sticky top-0 z-10">
         <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
-                    <h1 class="text-xl sm:text-2xl font-bold text-geister-500">Geister Swarm</h1>
-                    <p class="text-sm text-gray-400" id="version-info">Loading...</p>
+                    <h1 class="text-xl sm:text-2xl font-bold text-white">Geister Swarm</h1>
+                    <p class="text-sm text-primary-400" id="version-info">Loading...</p>
                 </div>
                 <div class="flex gap-2">
-                    <button onclick="openSwarmModal()" class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 justify-center">
+                    <button onclick="openSwarmModal()" class="bg-primary-700 hover:bg-primary-600 text-white px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 justify-center">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
                         Swarm
                     </button>
-                    <button onclick="refreshAll()" class="bg-geister-600 hover:bg-geister-700 px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 justify-center">
+                    <button onclick="refreshAll()" class="bg-primary-600 hover:bg-primary-500 text-white px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 justify-center">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                         Refresh
                     </button>
@@ -57,73 +64,73 @@
     <main class="max-w-7xl mx-auto px-4 py-6 sm:px-6">
         <!-- Status Cards -->
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
-                <p class="text-gray-400 text-sm">API Status</p>
-                <p class="text-2xl font-bold" id="api-status">--</p>
+            <div class="bg-primary-50 rounded-lg p-4 border border-primary-200 shadow-sm">
+                <p class="text-primary-500 text-sm">API Status</p>
+                <p class="text-2xl font-bold text-primary-900" id="api-status">--</p>
             </div>
-            <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
-                <p class="text-gray-400 text-sm">Total Agents</p>
-                <p class="text-2xl font-bold" id="total-agents">--</p>
+            <div class="bg-primary-50 rounded-lg p-4 border border-primary-200 shadow-sm">
+                <p class="text-primary-500 text-sm">Total Agents</p>
+                <p class="text-2xl font-bold text-primary-900" id="total-agents">--</p>
             </div>
-            <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
-                <p class="text-gray-400 text-sm">Total Sessions</p>
-                <p class="text-2xl font-bold" id="total-sessions">--</p>
+            <div class="bg-primary-50 rounded-lg p-4 border border-primary-200 shadow-sm">
+                <p class="text-primary-500 text-sm">Total Sessions</p>
+                <p class="text-2xl font-bold text-primary-900" id="total-sessions">--</p>
             </div>
-            <div class="bg-gray-800 rounded-xl p-4 border border-gray-700">
-                <p class="text-gray-400 text-sm">Inactivity</p>
-                <p class="text-2xl font-bold" id="inactivity">--</p>
+            <div class="bg-primary-50 rounded-lg p-4 border border-primary-200 shadow-sm">
+                <p class="text-primary-500 text-sm">Inactivity</p>
+                <p class="text-2xl font-bold text-primary-900" id="inactivity">--</p>
             </div>
         </div>
 
         <!-- Persona Distribution -->
-        <div class="bg-gray-800 rounded-xl p-4 border border-gray-700 mb-6">
-            <h2 class="text-lg font-semibold mb-3">Persona Distribution</h2>
+        <div class="bg-primary-50 rounded-lg p-4 border border-primary-200 shadow-sm mb-6">
+            <h2 class="text-lg font-semibold mb-3 text-primary-900">Persona Distribution</h2>
             <div class="flex flex-wrap gap-4" id="persona-stats">
-                <span class="text-gray-500">Loading...</span>
+                <span class="text-primary-500">Loading...</span>
             </div>
         </div>
 
         <!-- Telos Executor Status -->
-        <div class="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-6">
+        <div class="bg-primary-50 rounded-lg border border-primary-200 shadow-sm p-4 mb-6">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
                 <div>
-                    <h3 class="font-medium flex items-center gap-2">
+                    <h3 class="font-medium flex items-center gap-2 text-primary-900">
                         Telos Executor
-                        <span id="executor-status-badge" class="text-xs px-2 py-0.5 rounded bg-gray-600">Loading...</span>
+                        <span id="executor-status-badge" class="text-xs px-2 py-0.5 rounded bg-primary-200 text-primary-600">Loading...</span>
                     </h3>
-                    <p class="text-sm text-gray-400">Background engine that executes agent missions</p>
+                    <p class="text-sm text-primary-500">Background engine that executes agent missions</p>
                 </div>
                 <div class="flex gap-2">
-                    <button onclick="toggleExecutor()" id="executor-toggle-btn" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-sm font-medium">
+                    <button onclick="toggleExecutor()" id="executor-toggle-btn" class="px-4 py-2 rounded bg-primary-800 hover:bg-primary-700 text-white text-sm font-medium">
                         ▶ Start
                     </button>
-                    <button onclick="openExecutorLogModal()" class="px-4 py-2 rounded-lg bg-gray-600 hover:bg-gray-500 text-sm font-medium">
+                    <button onclick="openExecutorLogModal()" class="px-4 py-2 rounded bg-primary-200 hover:bg-primary-300 text-primary-700 text-sm font-medium">
                         📜 View Log
                     </button>
                 </div>
             </div>
             <div class="flex flex-wrap gap-4 text-sm" id="executor-info">
-                <span class="text-gray-400">Interval: <span id="executor-interval">--</span>s</span>
-                <span class="text-gray-400">Model: <span id="executor-model">--</span></span>
-                <span class="text-gray-400">Executions: <span id="executor-count">0</span></span>
+                <span class="text-primary-500">Interval: <span id="executor-interval" class="text-primary-700">--</span>s</span>
+                <span class="text-primary-500">Model: <span id="executor-model" class="text-primary-700">--</span></span>
+                <span class="text-primary-500">Executions: <span id="executor-count" class="text-primary-700">0</span></span>
             </div>
         </div>
 
         <!-- Bulk Telos Control -->
-        <div class="bg-gray-800 rounded-xl border border-gray-700 p-4 mb-6">
+        <div class="bg-primary-50 rounded-lg border border-primary-200 shadow-sm p-4 mb-6">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
-                    <h3 class="font-medium">Bulk Agent Control</h3>
-                    <p class="text-sm text-gray-400">Set all agents' telos state at once</p>
+                    <h3 class="font-medium text-primary-900">Bulk Agent Control</h3>
+                    <p class="text-sm text-primary-500">Set all agents' telos state at once</p>
                 </div>
                 <div class="flex gap-2">
-                    <button onclick="setAllAgentsState('active')" class="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-sm font-medium">
+                    <button onclick="setAllAgentsState('active')" class="px-4 py-2 rounded bg-primary-800 hover:bg-primary-700 text-white text-sm font-medium">
                         ▶ Start All
                     </button>
-                    <button onclick="setAllAgentsState('idle')" class="px-4 py-2 rounded-lg bg-yellow-600 hover:bg-yellow-700 text-sm font-medium">
+                    <button onclick="setAllAgentsState('idle')" class="px-4 py-2 rounded bg-primary-300 hover:bg-primary-400 text-primary-800 text-sm font-medium">
                         ⏸ Pause All
                     </button>
-                    <button onclick="openTelosTemplatesModal()" class="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-sm font-medium">
+                    <button onclick="openTelosTemplatesModal()" class="px-4 py-2 rounded bg-primary-200 hover:bg-primary-300 text-primary-700 text-sm font-medium">
                         📋 Templates
                     </button>
                 </div>
@@ -131,73 +138,73 @@
         </div>
 
         <!-- Agents Table -->
-        <div class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-            <div class="p-4 border-b border-gray-700 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-                <h2 class="text-lg font-semibold">Agents <span id="agents-count" class="text-sm font-normal text-gray-400"></span></h2>
+        <div class="bg-white rounded-lg border border-primary-200 shadow-sm overflow-hidden">
+            <div class="p-4 border-b border-primary-200 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+                <h2 class="text-lg font-semibold text-primary-900">Agents <span id="agents-count" class="text-sm font-normal text-primary-500"></span></h2>
                 <div class="flex items-center gap-2">
                     <input type="text" id="agent-search" placeholder="Search by name..." 
-                        class="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm w-48 focus:outline-none focus:border-geister-500"
+                        class="bg-primary-50 border border-primary-200 rounded px-3 py-2 text-sm w-48 focus:outline-none focus:border-primary-400 text-primary-900"
                         oninput="filterAgents()">
-                    <button onclick="clearSearch()" class="text-gray-400 hover:text-white text-sm">Clear</button>
+                    <button onclick="clearSearch()" class="text-primary-500 hover:text-primary-700 text-sm">Clear</button>
                 </div>
             </div>
             
             <!-- Mobile Cards View -->
             <div class="sm:hidden" id="agents-mobile">
-                <div class="p-4 text-gray-500">Loading agents...</div>
+                <div class="p-4 text-primary-500">Loading agents...</div>
             </div>
             
             <!-- Desktop Table View -->
             <div class="hidden sm:block overflow-x-auto">
                 <table class="w-full">
-                    <thead class="bg-gray-750 text-left text-sm text-gray-400">
+                    <thead class="bg-primary-100 text-left text-sm text-primary-600">
                         <tr>
-                            <th class="px-4 py-3">Agent</th>
-                            <th class="px-4 py-3">Persona</th>
-                            <th class="px-4 py-3">Telos</th>
-                            <th class="px-4 py-3">Sessions</th>
-                            <th class="px-4 py-3">Last Active</th>
-                            <th class="px-4 py-3">Actions</th>
+                            <th class="px-4 py-3 font-medium">Agent</th>
+                            <th class="px-4 py-3 font-medium">Persona</th>
+                            <th class="px-4 py-3 font-medium">Telos</th>
+                            <th class="px-4 py-3 font-medium">Sessions</th>
+                            <th class="px-4 py-3 font-medium">Last Active</th>
+                            <th class="px-4 py-3 font-medium">Actions</th>
                         </tr>
                     </thead>
-                    <tbody id="agents-table" class="divide-y divide-gray-700">
-                        <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">Loading agents...</td></tr>
+                    <tbody id="agents-table" class="divide-y divide-primary-100">
+                        <tr><td colspan="6" class="px-4 py-8 text-center text-primary-500">Loading agents...</td></tr>
                     </tbody>
                 </table>
             </div>
             
             <!-- Pagination -->
-            <div class="p-4 border-t border-gray-700 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-                <div class="text-sm text-gray-400">
+            <div class="p-4 border-t border-primary-200 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+                <div class="text-sm text-primary-500">
                     Showing <span id="page-start">0</span>-<span id="page-end">0</span> of <span id="page-total">0</span>
                 </div>
                 <div class="flex items-center gap-2">
-                    <button onclick="prevPage()" id="btn-prev" class="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed" disabled>← Prev</button>
-                    <span id="page-info" class="text-sm text-gray-400">Page 1</span>
-                    <button onclick="nextPage()" id="btn-next" class="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed" disabled>Next →</button>
+                    <button onclick="prevPage()" id="btn-prev" class="px-3 py-1 rounded bg-primary-100 hover:bg-primary-200 text-primary-700 disabled:opacity-50 disabled:cursor-not-allowed" disabled>← Prev</button>
+                    <span id="page-info" class="text-sm text-primary-500">Page 1</span>
+                    <button onclick="nextPage()" id="btn-next" class="px-3 py-1 rounded bg-primary-100 hover:bg-primary-200 text-primary-700 disabled:opacity-50 disabled:cursor-not-allowed" disabled>Next →</button>
                 </div>
             </div>
         </div>
 
         <!-- Error Display -->
-        <div id="error-banner" class="hidden mt-4 bg-red-900/50 border border-red-700 rounded-xl p-4 text-red-200">
+        <div id="error-banner" class="hidden mt-4 bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
             <p id="error-message"></p>
         </div>
     </main>
 
     <!-- Agent Details Modal -->
-    <div id="agent-modal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4">
-        <div class="bg-gray-800 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-            <div class="p-4 border-b border-gray-700 flex justify-between items-center">
-                <h2 class="text-xl font-bold" id="modal-agent-name">Agent Details</h2>
-                <button onclick="closeAgentModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+    <div id="agent-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-xl">
+            <div class="p-4 border-b border-primary-200 flex justify-between items-center">
+                <h2 class="text-xl font-bold text-primary-900" id="modal-agent-name">Agent Details</h2>
+                <button onclick="closeAgentModal()" class="text-primary-400 hover:text-primary-600 text-2xl">&times;</button>
             </div>
             
             <!-- Tabs -->
-            <div class="flex border-b border-gray-700">
-                <button onclick="switchTab('details')" id="tab-details" class="px-4 py-2 text-geister-500 border-b-2 border-geister-500">Details</button>
-                <button onclick="switchTab('chat')" id="tab-chat" class="px-4 py-2 text-gray-400 hover:text-white">Chat</button>
-                <button onclick="switchTab('memories')" id="tab-memories" class="px-4 py-2 text-gray-400 hover:text-white">Memories</button>
+            <div class="flex border-b border-primary-200">
+                <button onclick="switchTab('details')" id="tab-details" class="px-4 py-2 text-primary-900 border-b-2 border-primary-900">Details</button>
+                <button onclick="switchTab('chat')" id="tab-chat" class="px-4 py-2 text-primary-500 hover:text-primary-700">Chat</button>
+                <button onclick="switchTab('memories')" id="tab-memories" class="px-4 py-2 text-primary-500 hover:text-primary-700">Memories</button>
             </div>
             
             <!-- Details Tab -->
@@ -205,12 +212,12 @@
                 <div class="space-y-4">
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <label class="text-sm text-gray-400">Display Name</label>
-                            <input type="text" id="edit-display-name" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 mt-1">
+                            <label class="text-sm text-primary-500">Display Name</label>
+                            <input type="text" id="edit-display-name" class="w-full bg-primary-50 border border-primary-200 rounded px-3 py-2 mt-1 text-primary-900">
                         </div>
                         <div>
-                            <label class="text-sm text-gray-400">Persona</label>
-                            <select id="edit-persona" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 mt-1">
+                            <label class="text-sm text-primary-500">Persona</label>
+                            <select id="edit-persona" class="w-full bg-primary-50 border border-primary-200 rounded px-3 py-2 mt-1 text-primary-900">
                                 <option value="compliant">Compliant</option>
                                 <option value="watchful">Watchful</option>
                                 <option value="exploiter">Exploiter</option>
@@ -219,31 +226,31 @@
                     </div>
                     
                     <div>
-                        <label class="text-sm text-gray-400">Principal</label>
-                        <p id="agent-principal" class="font-mono text-sm bg-gray-700 rounded-lg px-3 py-2 mt-1 break-all"></p>
+                        <label class="text-sm text-primary-500">Principal</label>
+                        <p id="agent-principal" class="font-mono text-sm bg-primary-50 rounded px-3 py-2 mt-1 break-all text-primary-700"></p>
                     </div>
                     
                     <div>
-                        <label class="text-sm text-gray-400">Background (metadata)</label>
-                        <div id="agent-background" class="bg-gray-700 rounded-lg px-3 py-2 mt-1 space-y-1 text-sm"></div>
+                        <label class="text-sm text-primary-500">Background (metadata)</label>
+                        <div id="agent-background" class="bg-primary-50 rounded px-3 py-2 mt-1 space-y-1 text-sm text-primary-700"></div>
                     </div>
                     
                     <div class="grid grid-cols-2 gap-4 text-sm">
-                        <div><span class="text-gray-400">Sessions:</span> <span id="agent-sessions"></span></div>
-                        <div><span class="text-gray-400">Created:</span> <span id="agent-created"></span></div>
+                        <div><span class="text-primary-500">Sessions:</span> <span id="agent-sessions" class="text-primary-900"></span></div>
+                        <div><span class="text-primary-500">Created:</span> <span id="agent-created" class="text-primary-900"></span></div>
                     </div>
                     
-                    <button onclick="saveAgentChanges()" class="w-full bg-geister-600 hover:bg-geister-700 px-4 py-2 rounded-lg font-medium">Save Changes</button>
+                    <button onclick="saveAgentChanges()" class="w-full bg-primary-800 hover:bg-primary-700 text-white px-4 py-2 rounded font-medium">Save Changes</button>
                 </div>
             </div>
             
             <!-- Chat Tab -->
             <div id="panel-chat" class="flex-1 overflow-hidden hidden flex flex-col">
-                <div id="chat-messages" class="flex-1 overflow-y-auto p-4 space-y-3"></div>
-                <div class="p-4 border-t border-gray-700">
+                <div id="chat-messages" class="flex-1 overflow-y-auto p-4 space-y-3 bg-primary-50"></div>
+                <div class="p-4 border-t border-primary-200">
                     <div class="flex gap-2">
-                        <input type="text" id="chat-input" placeholder="Type a message..." class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2" onkeypress="if(event.key==='Enter')sendChat()">
-                        <button onclick="sendChat()" id="chat-send-btn" class="bg-geister-600 hover:bg-geister-700 px-4 py-2 rounded-lg">Send</button>
+                        <input type="text" id="chat-input" placeholder="Type a message..." class="flex-1 bg-primary-50 border border-primary-200 rounded px-3 py-2 text-primary-900" onkeypress="if(event.key==='Enter')sendChat()">
+                        <button onclick="sendChat()" id="chat-send-btn" class="bg-primary-800 hover:bg-primary-700 text-white px-4 py-2 rounded">Send</button>
                     </div>
                 </div>
             </div>
@@ -256,55 +263,55 @@
     </div>
 
     <!-- Swarm Management Modal -->
-    <div id="swarm-modal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4">
-        <div class="bg-gray-800 rounded-2xl w-full max-w-md p-6">
+    <div id="swarm-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg w-full max-w-md p-6 shadow-xl">
             <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-bold">Swarm Management</h2>
-                <button onclick="closeSwarmModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+                <h2 class="text-xl font-bold text-primary-900">Swarm Management</h2>
+                <button onclick="closeSwarmModal()" class="text-primary-400 hover:text-primary-600 text-2xl">&times;</button>
             </div>
             
             <div class="space-y-4">
                 <div>
-                    <label class="text-sm text-gray-400">Number of Agents</label>
-                    <input type="number" id="swarm-count" value="5" min="1" max="50" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 mt-1">
+                    <label class="text-sm text-primary-500">Number of Agents</label>
+                    <input type="number" id="swarm-count" value="5" min="1" max="50" class="w-full bg-primary-50 border border-primary-200 rounded px-3 py-2 mt-1 text-primary-900">
                 </div>
                 <div>
-                    <label class="text-sm text-gray-400">Start Index</label>
-                    <input type="number" id="swarm-start" value="1" min="1" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 mt-1">
+                    <label class="text-sm text-primary-500">Start Index</label>
+                    <input type="number" id="swarm-start" value="1" min="1" class="w-full bg-primary-50 border border-primary-200 rounded px-3 py-2 mt-1 text-primary-900">
                 </div>
                 <div>
-                    <label class="text-sm text-gray-400">Persona</label>
-                    <select id="swarm-persona" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 mt-1">
+                    <label class="text-sm text-primary-500">Persona</label>
+                    <select id="swarm-persona" class="w-full bg-primary-50 border border-primary-200 rounded px-3 py-2 mt-1 text-primary-900">
                         <option value="compliant">Compliant</option>
                         <option value="watchful">Watchful</option>
                         <option value="exploiter">Exploiter</option>
                     </select>
                 </div>
                 
-                <button onclick="recreateSwarm()" class="w-full bg-purple-600 hover:bg-purple-700 px-4 py-3 rounded-lg font-medium">Generate Agents</button>
+                <button onclick="recreateSwarm()" class="w-full bg-primary-800 hover:bg-primary-700 text-white px-4 py-3 rounded font-medium">Generate Agents</button>
                 
-                <div id="swarm-result" class="hidden text-sm p-3 rounded-lg"></div>
+                <div id="swarm-result" class="hidden text-sm p-3 rounded"></div>
             </div>
         </div>
     </div>
 
     <!-- Telos Templates Modal -->
-    <div id="telos-templates-modal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4">
-        <div class="bg-gray-800 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-            <div class="p-4 border-b border-gray-700 flex justify-between items-center">
-                <h2 class="text-xl font-bold">Telos Templates</h2>
-                <button onclick="closeTelosTemplatesModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+    <div id="telos-templates-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-xl">
+            <div class="p-4 border-b border-primary-200 flex justify-between items-center">
+                <h2 class="text-xl font-bold text-primary-900">Telos Templates</h2>
+                <button onclick="closeTelosTemplatesModal()" class="text-primary-400 hover:text-primary-600 text-2xl">&times;</button>
             </div>
             
             <div class="p-4 overflow-y-auto flex-1 space-y-4">
                 <!-- Assign Default to All -->
-                <div class="bg-purple-900/30 border border-purple-700 rounded-lg p-3">
+                <div class="bg-primary-100 border border-primary-200 rounded-lg p-3">
                     <div class="flex items-center justify-between">
                         <div>
-                            <p class="font-medium">Assign Default Telos to All Agents</p>
-                            <p class="text-sm text-gray-400">Assigns the default template to agents without a telos</p>
+                            <p class="font-medium text-primary-900">Assign Default Telos to All Agents</p>
+                            <p class="text-sm text-primary-500">Assigns the default template to agents without a telos</p>
                         </div>
-                        <button onclick="assignDefaultToAll()" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg text-sm font-medium">
+                        <button onclick="assignDefaultToAll()" class="px-4 py-2 bg-primary-800 hover:bg-primary-700 text-white rounded text-sm font-medium">
                             Assign to All
                         </button>
                     </div>
@@ -312,29 +319,29 @@
 
                 <!-- Existing Templates -->
                 <div>
-                    <h3 class="font-medium mb-3">Existing Templates</h3>
+                    <h3 class="font-medium mb-3 text-primary-900">Existing Templates</h3>
                     <div id="telos-templates-list" class="space-y-3">
-                        <p class="text-gray-500">Loading...</p>
+                        <p class="text-primary-500">Loading...</p>
                     </div>
                 </div>
                 
                 <!-- Create New Template -->
-                <div class="border-t border-gray-700 pt-4">
-                    <h3 class="font-medium mb-3">Create New Template</h3>
+                <div class="border-t border-primary-200 pt-4">
+                    <h3 class="font-medium mb-3 text-primary-900">Create New Template</h3>
                     <div class="space-y-3">
                         <div>
-                            <label class="text-sm text-gray-400">Name</label>
-                            <input type="text" id="new-template-name" placeholder="Citizen Onboarding" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 mt-1">
+                            <label class="text-sm text-primary-500">Name</label>
+                            <input type="text" id="new-template-name" placeholder="Citizen Onboarding" class="w-full bg-primary-50 border border-primary-200 rounded px-3 py-2 mt-1 text-primary-900">
                         </div>
                         <div>
-                            <label class="text-sm text-gray-400">Description</label>
-                            <input type="text" id="new-template-description" placeholder="Steps for new citizens to get started" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 mt-1">
+                            <label class="text-sm text-primary-500">Description</label>
+                            <input type="text" id="new-template-description" placeholder="Steps for new citizens to get started" class="w-full bg-primary-50 border border-primary-200 rounded px-3 py-2 mt-1 text-primary-900">
                         </div>
                         <div>
-                            <label class="text-sm text-gray-400">Steps (one per line)</label>
-                            <textarea id="new-template-steps" rows="6" placeholder="Find a realm you like&#10;Join the realm&#10;Set your avatar&#10;Check pending invoices&#10;Vote on proposals&#10;Create a proposal" class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 mt-1 font-mono text-sm"></textarea>
+                            <label class="text-sm text-primary-500">Steps (one per line)</label>
+                            <textarea id="new-template-steps" rows="6" placeholder="Find a realm you like&#10;Join the realm&#10;Set your avatar&#10;Check pending invoices&#10;Vote on proposals&#10;Create a proposal" class="w-full bg-primary-50 border border-primary-200 rounded px-3 py-2 mt-1 font-mono text-sm text-primary-900"></textarea>
                         </div>
-                        <button onclick="createTelosTemplate()" class="w-full bg-purple-600 hover:bg-purple-700 px-4 py-3 rounded-lg font-medium">Create Template</button>
+                        <button onclick="createTelosTemplate()" class="w-full bg-primary-800 hover:bg-primary-700 text-white px-4 py-3 rounded font-medium">Create Template</button>
                     </div>
                 </div>
             </div>
@@ -342,22 +349,22 @@
     </div>
 
     <!-- Executor Log Modal -->
-    <div id="executor-log-modal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4">
-        <div class="bg-gray-800 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
-            <div class="p-4 border-b border-gray-700 flex justify-between items-center">
-                <h2 class="text-xl font-bold">Telos Execution Log</h2>
-                <button onclick="closeExecutorLogModal()" class="text-gray-400 hover:text-white text-2xl">&times;</button>
+    <div id="executor-log-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col shadow-xl">
+            <div class="p-4 border-b border-primary-200 flex justify-between items-center">
+                <h2 class="text-xl font-bold text-primary-900">Telos Execution Log</h2>
+                <button onclick="closeExecutorLogModal()" class="text-primary-400 hover:text-primary-600 text-2xl">&times;</button>
             </div>
             
             <div class="p-4 overflow-y-auto flex-1">
                 <div id="executor-log-list" class="space-y-2">
-                    <p class="text-gray-500">Loading...</p>
+                    <p class="text-primary-500">Loading...</p>
                 </div>
             </div>
         </div>
     </div>
 
-    <footer class="text-center text-gray-500 text-sm py-6">
+    <footer class="text-center text-primary-500 text-sm py-6 border-t border-primary-200">
         <p>Geister Swarm Dashboard</p>
     </footer>
 
@@ -371,7 +378,7 @@
         const PAGE_SIZE = 5;
 
         const personaEmoji = { 'compliant': '🐑', 'watchful': '🦊', 'exploiter': '🦅', 'unknown': '❓' };
-        const personaColors = { 'compliant': 'bg-green-500', 'watchful': 'bg-yellow-500', 'exploiter': 'bg-red-500', 'unknown': 'bg-gray-500' };
+        const personaColors = { 'compliant': 'bg-green-100 text-green-700', 'watchful': 'bg-yellow-100 text-yellow-700', 'exploiter': 'bg-red-100 text-red-700', 'unknown': 'bg-primary-100 text-primary-700' };
 
         function showError(msg) {
             document.getElementById('error-banner').classList.remove('hidden');
@@ -398,14 +405,14 @@
             try {
                 const res = await fetch(`${API_BASE}/`);
                 const data = await res.json();
-                document.getElementById('api-status').innerHTML = `<span class="text-green-400">Online</span>`;
+                document.getElementById('api-status').innerHTML = `<span class="text-green-600">Online</span>`;
                 const version = data.version || 'unknown';
                 const commit = data.git_commit ? ` (${data.git_commit})` : '';
                 document.getElementById('version-info').textContent = `v${version}${commit}`;
                 document.getElementById('inactivity').textContent = data.inactivity_timeout_seconds > 0 ? `${Math.floor((data.seconds_since_last_activity || 0) / 60)}m` : 'Disabled';
                 hideError();
             } catch (e) {
-                document.getElementById('api-status').innerHTML = `<span class="text-red-400">Offline</span>`;
+                document.getElementById('api-status').innerHTML = `<span class="text-red-600">Offline</span>`;
                 showError(`Cannot connect to API: ${e.message}`);
             }
         }
@@ -423,17 +430,17 @@
                 const personaCounts = {};
                 agentsCache.forEach(a => { const p = a.persona || 'unknown'; personaCounts[p] = (personaCounts[p] || 0) + 1; });
                 document.getElementById('persona-stats').innerHTML = Object.entries(personaCounts).map(([persona, count]) => 
-                    `<a href="/dashboard/persona/${encodeURIComponent(persona)}" class="flex items-center gap-2 ${personaColors[persona] || 'bg-gray-500'}/20 px-3 py-2 rounded-lg hover:ring-2 hover:ring-white/20">
+                    `<a href="/dashboard/persona/${encodeURIComponent(persona)}" class="flex items-center gap-2 ${personaColors[persona] || 'bg-primary-100 text-primary-700'} px-3 py-2 rounded-lg hover:ring-2 hover:ring-primary-300">
                         <span class="text-xl">${personaEmoji[persona] || '❓'}</span>
                         <span class="capitalize">${persona}</span>
                         <span class="font-bold">${count}</span>
                     </a>`
-                ).join('') || '<span class="text-gray-500">No agents</span>';
+                ).join('') || '<span class="text-primary-500">No agents</span>';
                 
                 // Apply filter and render
                 filterAgents();
             } catch (e) {
-                document.getElementById('agents-table').innerHTML = `<tr><td colspan="6" class="px-4 py-8 text-center text-red-400">Error: ${e.message}</td></tr>`;
+                document.getElementById('agents-table').innerHTML = `<tr><td colspan="6" class="px-4 py-8 text-center text-red-600">Error: ${e.message}</td></tr>`;
             }
         }
 
@@ -473,31 +480,31 @@
             document.getElementById('btn-next').disabled = currentPage >= totalPages;
             
             if (pageAgents.length === 0) {
-                document.getElementById('agents-table').innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">No agents found</td></tr>';
-                document.getElementById('agents-mobile').innerHTML = '<div class="p-4 text-gray-500">No agents found</div>';
+                document.getElementById('agents-table').innerHTML = '<tr><td colspan="6" class="px-4 py-8 text-center text-primary-500">No agents found</td></tr>';
+                document.getElementById('agents-mobile').innerHTML = '<div class="p-4 text-primary-500">No agents found</div>';
                 return;
             }
             
-            const telosStateColors = { 'idle': 'bg-gray-600', 'active': 'bg-green-600', 'completed': 'bg-blue-600', 'failed': 'bg-red-600' };
+            const telosStateColors = { 'idle': 'bg-primary-200 text-primary-700', 'active': 'bg-green-100 text-green-700', 'completed': 'bg-blue-100 text-blue-700', 'failed': 'bg-red-100 text-red-700' };
             
             document.getElementById('agents-table').innerHTML = pageAgents.map(a => {
                 const telosState = a.telos_state || null;
                 const telosName = a.telos_name || (a.custom_telos ? 'Custom' : null);
                 return `
-                <tr class="hover:bg-gray-750/50 cursor-pointer" onclick="goToAgent('${a.display_name || a.agent_id}')">
+                <tr class="hover:bg-primary-50 cursor-pointer" onclick="goToAgent('${a.display_name || a.agent_id}')">
                     <td class="px-4 py-3">
-                        <div class="font-medium">${a.display_name || a.agent_id}</div>
-                        <div class="text-xs text-gray-500 font-mono">${(a.principal || '').substring(0, 15)}...</div>
+                        <div class="font-medium text-primary-900">${a.display_name || a.agent_id}</div>
+                        <div class="text-xs text-primary-400 font-mono">${(a.principal || '').substring(0, 15)}...</div>
                     </td>
-                    <td class="px-4 py-3"><span class="inline-flex items-center gap-1 ${personaColors[a.persona] || 'bg-gray-500'}/20 px-2 py-1 rounded text-sm">${personaEmoji[a.persona] || '❓'} ${a.persona || 'unknown'}</span></td>
+                    <td class="px-4 py-3"><span class="inline-flex items-center gap-1 ${personaColors[a.persona] || 'bg-primary-100'} px-2 py-1 rounded text-sm">${personaEmoji[a.persona] || '❓'} ${a.persona || 'unknown'}</span></td>
                     <td class="px-4 py-3">
-                        ${telosState ? `<span class="inline-flex items-center gap-1 ${telosStateColors[telosState]}/20 px-2 py-1 rounded text-sm capitalize">${telosState}</span>` : '<span class="text-gray-500 text-sm">—</span>'}
-                        ${telosName ? `<div class="text-xs text-gray-500 mt-1">${telosName}</div>` : ''}
+                        ${telosState ? `<span class="inline-flex items-center gap-1 ${telosStateColors[telosState]} px-2 py-1 rounded text-sm capitalize">${telosState}</span>` : '<span class="text-primary-400 text-sm">—</span>'}
+                        ${telosName ? `<div class="text-xs text-primary-500 mt-1">${telosName}</div>` : ''}
                     </td>
-                    <td class="px-4 py-3">${a.total_sessions || 0}</td>
-                    <td class="px-4 py-3 text-gray-400">${formatDate(a.last_active_at)}</td>
+                    <td class="px-4 py-3 text-primary-700">${a.total_sessions || 0}</td>
+                    <td class="px-4 py-3 text-primary-500">${formatDate(a.last_active_at)}</td>
                     <td class="px-4 py-3">
-                        <a href="/dashboard/agent/${encodeURIComponent(a.agent_id)}" class="text-geister-500 hover:text-geister-400">View</a>
+                        <a href="/dashboard/agent/${encodeURIComponent(a.agent_id)}" class="text-primary-600 hover:text-primary-800 font-medium">View</a>
                     </td>
                 </tr>`;
             }).join('');
@@ -505,18 +512,18 @@
             document.getElementById('agents-mobile').innerHTML = pageAgents.map(a => {
                 const telosState = a.telos_state || null;
                 return `
-                <a href="/dashboard/agent/${encodeURIComponent(a.agent_id)}" class="block p-4 border-b border-gray-700 hover:bg-gray-750/50">
+                <a href="/dashboard/agent/${encodeURIComponent(a.agent_id)}" class="block p-4 border-b border-primary-100 hover:bg-primary-50">
                     <div class="flex justify-between items-start mb-2">
                         <div>
-                            <div class="font-medium">${a.display_name || a.agent_id}</div>
-                            <div class="text-xs text-gray-500 font-mono">${(a.principal || '').substring(0, 20)}...</div>
+                            <div class="font-medium text-primary-900">${a.display_name || a.agent_id}</div>
+                            <div class="text-xs text-primary-400 font-mono">${(a.principal || '').substring(0, 20)}...</div>
                         </div>
                         <div class="flex flex-col items-end gap-1">
-                            <span class="inline-flex items-center gap-1 ${personaColors[a.persona] || 'bg-gray-500'}/20 px-2 py-1 rounded text-sm">${personaEmoji[a.persona] || '❓'} ${a.persona || 'unknown'}</span>
-                            ${telosState ? `<span class="inline-flex items-center ${telosStateColors[telosState]}/20 px-2 py-0.5 rounded text-xs capitalize">${telosState}</span>` : ''}
+                            <span class="inline-flex items-center gap-1 ${personaColors[a.persona] || 'bg-primary-100'} px-2 py-1 rounded text-sm">${personaEmoji[a.persona] || '❓'} ${a.persona || 'unknown'}</span>
+                            ${telosState ? `<span class="inline-flex items-center ${telosStateColors[telosState]} px-2 py-0.5 rounded text-xs capitalize">${telosState}</span>` : ''}
                         </div>
                     </div>
-                    <div class="flex justify-between text-sm text-gray-400">
+                    <div class="flex justify-between text-sm text-primary-500">
                         <span>${a.total_sessions || 0} sessions</span>
                         <span>${formatDate(a.last_active_at)}</span>
                     </div>
