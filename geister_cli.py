@@ -35,6 +35,16 @@ from typing import Optional, Tuple
 import typer
 from rich.console import Console
 
+__version__ = "0.1.6"
+
+
+def version_callback(value: bool):
+    """Callback for --version flag."""
+    if value:
+        console.print(f"[bold]Geister[/bold] version {__version__}")
+        raise typer.Exit()
+
+
 # Environment variables configuration - grouped by mode
 CLIENT_ENV_VARS = {
     "GEISTER_API_URL": ("Geister API URL", "https://geister-api.realmsgos.dev"),
@@ -54,7 +64,10 @@ SERVER_ENV_VARS = {
     "INACTIVITY_TIMEOUT_SECONDS": ("API inactivity timeout (seconds)", "3600"),
 }
 
-# Initialize typer app and console
+# Initialize console first (needed by version_callback)
+console = Console()
+
+# Initialize typer app
 app = typer.Typer(
     name="geister",
     help="Geister - AI Governance Agents for Realms. Use 'geister status' to see environment variables.",
@@ -62,7 +75,6 @@ app = typer.Typer(
     rich_markup_mode="rich",
     add_completion=False,
 )
-console = Console()
 
 # Sub-applications
 agent_app = typer.Typer(help="Agent management and interaction")
@@ -970,12 +982,27 @@ def mode_cmd(
 def version():
     """Show version information."""
     console.print("[bold]Geister[/bold] - AI Governance Agents")
-    console.print("Version: 0.1.0")
+    console.print(f"Version: {__version__}")
 
 
 # =============================================================================
 # Main Entry Point
 # =============================================================================
+
+@app.callback(invoke_without_command=True)
+def callback(
+    ctx: typer.Context,
+    version: bool = typer.Option(
+        False,
+        "--version",
+        help="Show version and exit",
+        callback=version_callback,
+        is_eager=True,
+    ),
+):
+    """Geister CLI callback."""
+    pass
+
 
 def main():
     """Main entry point for the CLI."""
