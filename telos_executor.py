@@ -141,7 +141,7 @@ If you cannot complete the step (e.g., missing permissions, errors), explain why
                 
                 log(f"  [{display_name}] Tool: {tool_name}")
                 
-                # Get agent's principal for auto-fill (e.g., proposer_id, voter_id)
+                # Get agent's principal and identity for tool calls
                 agent_principal = agent_data.get('principal', '')
                 
                 tool_result = execute_tool(
@@ -149,7 +149,8 @@ If you cannot complete the step (e.g., missing permissions, errors), explain why
                     tool_args, 
                     network=DEFAULT_NETWORK,
                     realm_folder='.',
-                    user_principal=agent_principal
+                    user_principal=agent_principal,
+                    user_identity=agent_id  # Use agent's dfx identity for calls
                 )
                 
                 messages.append({

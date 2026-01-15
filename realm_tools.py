@@ -32,7 +32,8 @@ def _run_dfx_call(
     network: str = "staging",
     realm_folder: str = ".",
     timeout: int = 60,
-    realm_principal: str = ""
+    realm_principal: str = "",
+    identity: str = ""
 ) -> str:
     """
     Run a dfx canister call with JSON output.
@@ -45,6 +46,7 @@ def _run_dfx_call(
         realm_folder: Working directory with dfx.json
         timeout: Command timeout in seconds
         realm_principal: Canister ID to use directly (overrides canister name)
+        identity: dfx identity to use for the call (uses current identity if not specified)
     
     Returns:
         JSON string result or error message
@@ -57,6 +59,10 @@ def _run_dfx_call(
         "--network", network,
         "--output", "json"
     ]
+    
+    # Use specific identity if provided
+    if identity:
+        cmd.extend(["--identity", identity])
     
     try:
         result = subprocess.run(
@@ -84,7 +90,8 @@ def _run_extension_call(
     args: Dict[str, Any] = None,
     network: str = "staging",
     realm_folder: str = ".",
-    timeout: int = 60
+    timeout: int = 60,
+    identity: str = ""
 ) -> str:
     """
     Run an extension sync call with JSON output.
@@ -96,6 +103,7 @@ def _run_extension_call(
         network: Network to use
         realm_folder: Working directory with dfx.json
         timeout: Command timeout in seconds
+        identity: dfx identity to use for the call
     
     Returns:
         JSON string result or error message
@@ -111,7 +119,8 @@ def _run_extension_call(
         args=candid_args,
         network=network,
         realm_folder=realm_folder,
-        timeout=timeout
+        timeout=timeout,
+        identity=identity
     )
 
 
@@ -245,7 +254,7 @@ def search_realm(query: str, network: str = "staging", realm_folder: str = ".") 
 # Citizen Tools
 # =============================================================================
 
-def join_realm(profile: str = "member", network: str = "staging", realm_folder: str = ".", realm_principal: str = "") -> str:
+def join_realm(profile: str = "member", network: str = "staging", realm_folder: str = ".", realm_principal: str = "", identity: str = "") -> str:
     """Join a realm as a citizen with a specific profile."""
     return _run_dfx_call(
         canister="realm_backend",
@@ -253,11 +262,12 @@ def join_realm(profile: str = "member", network: str = "staging", realm_folder: 
         args=f'("{profile}")',
         network=network,
         realm_folder=realm_folder,
-        realm_principal=realm_principal
+        realm_principal=realm_principal,
+        identity=identity
     )
 
 
-def set_profile_picture(profile_picture_url: str, network: str = "staging", realm_folder: str = ".", realm_principal: str = "") -> str:
+def set_profile_picture(profile_picture_url: str, network: str = "staging", realm_folder: str = ".", realm_principal: str = "", identity: str = "") -> str:
     """Set your profile picture in the realm."""
     return _run_dfx_call(
         canister="realm_backend",
@@ -265,11 +275,12 @@ def set_profile_picture(profile_picture_url: str, network: str = "staging", real
         args=f'("{profile_picture_url}")',
         network=network,
         realm_folder=realm_folder,
-        realm_principal=realm_principal
+        realm_principal=realm_principal,
+        identity=identity
     )
 
 
-def get_my_status(network: str = "staging", realm_folder: str = ".", realm_principal: str = "") -> str:
+def get_my_status(network: str = "staging", realm_folder: str = ".", realm_principal: str = "", identity: str = "") -> str:
     """Get your current user status in the realm."""
     return _run_dfx_call(
         canister="realm_backend",
@@ -277,11 +288,12 @@ def get_my_status(network: str = "staging", realm_folder: str = ".", realm_princ
         args="()",
         network=network,
         realm_folder=realm_folder,
-        realm_principal=realm_principal
+        realm_principal=realm_principal,
+        identity=identity
     )
 
 
-def get_my_principal(network: str = "staging", realm_folder: str = ".", realm_principal: str = "") -> str:
+def get_my_principal(network: str = "staging", realm_folder: str = ".", realm_principal: str = "", identity: str = "") -> str:
     """Get your principal ID."""
     return _run_dfx_call(
         canister="realm_backend",
@@ -289,7 +301,8 @@ def get_my_principal(network: str = "staging", realm_folder: str = ".", realm_pr
         args="()",
         network=network,
         realm_folder=realm_folder,
-        realm_principal=realm_principal
+        realm_principal=realm_principal,
+        identity=identity
     )
 
 
@@ -297,7 +310,7 @@ def get_my_principal(network: str = "staging", realm_folder: str = ".", realm_pr
 # Realm Status Tools
 # =============================================================================
 
-def realm_status(network: str = "staging", realm_folder: str = ".", realm_principal: str = "") -> str:
+def realm_status(network: str = "staging", realm_folder: str = ".", realm_principal: str = "", identity: str = "") -> str:
     """Get the current status of the realm (users, proposals, votes, extensions)."""
     return _run_dfx_call(
         canister="realm_backend",
@@ -305,7 +318,8 @@ def realm_status(network: str = "staging", realm_folder: str = ".", realm_princi
         args="()",
         network=network,
         realm_folder=realm_folder,
-        realm_principal=realm_principal
+        realm_principal=realm_principal,
+        identity=identity
     )
 
 
@@ -340,7 +354,7 @@ def db_schema(network: str = "staging", realm_folder: str = ".") -> str:
 # Governance / Voting Tools
 # =============================================================================
 
-def get_proposals(status: Optional[str] = None, network: str = "staging", realm_folder: str = ".") -> str:
+def get_proposals(status: Optional[str] = None, network: str = "staging", realm_folder: str = ".", identity: str = "") -> str:
     """Get governance proposals from the realm."""
     args = {"status": status} if status else {}
     return _run_extension_call(
@@ -348,22 +362,24 @@ def get_proposals(status: Optional[str] = None, network: str = "staging", realm_
         function="get_proposals",
         args=args,
         network=network,
-        realm_folder=realm_folder
+        realm_folder=realm_folder,
+        identity=identity
     )
 
 
-def get_proposal(proposal_id: str, network: str = "staging", realm_folder: str = ".") -> str:
+def get_proposal(proposal_id: str, network: str = "staging", realm_folder: str = ".", identity: str = "") -> str:
     """Get details of a specific proposal."""
     return _run_extension_call(
         extension="voting",
         function="get_proposal",
         args={"proposal_id": proposal_id},
         network=network,
-        realm_folder=realm_folder
+        realm_folder=realm_folder,
+        identity=identity
     )
 
 
-def cast_vote(proposal_id: str, vote: str, voter_id: str, network: str = "staging", realm_folder: str = ".") -> str:
+def cast_vote(proposal_id: str, vote: str, voter_id: str, network: str = "staging", realm_folder: str = ".", identity: str = "") -> str:
     """Cast a vote on a proposal (yes/no/abstain)."""
     if vote not in ["yes", "no", "abstain"]:
         return json.dumps({"error": f"vote must be 'yes', 'no', or 'abstain', got '{vote}'"})
@@ -373,37 +389,43 @@ def cast_vote(proposal_id: str, vote: str, voter_id: str, network: str = "stagin
         function="cast_vote",
         args={"proposal_id": proposal_id, "vote": vote, "voter": voter_id},
         network=network,
-        realm_folder=realm_folder
+        realm_folder=realm_folder,
+        identity=identity
     )
 
 
-def get_my_vote(proposal_id: str, voter_id: str, network: str = "staging", realm_folder: str = ".") -> str:
+def get_my_vote(proposal_id: str, voter_id: str, network: str = "staging", realm_folder: str = ".", identity: str = "") -> str:
     """Check if you have already voted on a proposal."""
     return _run_extension_call(
         extension="voting",
         function="get_user_vote",
         args={"proposal_id": proposal_id, "voter": voter_id},
         network=network,
-        realm_folder=realm_folder
+        realm_folder=realm_folder,
+        identity=identity
     )
 
 
-def submit_proposal(title: str, description: str, proposer_id: str, code_url: str = "", network: str = "staging", realm_folder: str = ".") -> str:
+def submit_proposal(title: str, description: str, proposer_id: str, code_url: str = "", network: str = "staging", realm_folder: str = ".", identity: str = "") -> str:
     """Submit a new proposal for voting."""
+    # code_url is required by the voting extension - provide default if empty
+    if not code_url:
+        code_url = "https://realms.vote/proposal/discussion"
+    
     args = {
         "title": title,
         "description": description,
-        "proposer": proposer_id
+        "proposer": proposer_id,
+        "code_url": code_url
     }
-    if code_url:
-        args["code_url"] = code_url
     
     return _run_extension_call(
         extension="voting",
         function="submit_proposal",
         args=args,
         network=network,
-        realm_folder=realm_folder
+        realm_folder=realm_folder,
+        identity=identity
     )
 
 
@@ -738,7 +760,7 @@ REALM_TOOLS = [
                     },
                     "code_url": {
                         "type": "string",
-                        "description": "Optional URL to proposal code/implementation"
+                        "description": "URL to proposal code/implementation or discussion link (defaults to generic link if not provided)"
                     }
                 },
                 "required": ["title", "description"]
@@ -888,8 +910,18 @@ TOOL_FUNCTIONS = {
 }
 
 
-def execute_tool(tool_name: str, arguments: dict, network: str = "staging", realm_folder: str = ".", realm_principal: str = "", user_principal: str = "") -> str:
-    """Execute a tool by name with given arguments."""
+def execute_tool(tool_name: str, arguments: dict, network: str = "staging", realm_folder: str = ".", realm_principal: str = "", user_principal: str = "", user_identity: str = "") -> str:
+    """Execute a tool by name with given arguments.
+    
+    Args:
+        tool_name: Name of the tool to execute
+        arguments: Arguments from the LLM
+        network: Network to use
+        realm_folder: Working directory
+        realm_principal: Canister ID for realm
+        user_principal: User's IC principal (for auto-filling voter_id, proposer_id)
+        user_identity: dfx identity name to use for calls (e.g., 'swarm_agent_005')
+    """
     if tool_name not in TOOL_FUNCTIONS:
         return json.dumps({"error": f"Unknown tool '{tool_name}'"})
     
@@ -898,11 +930,12 @@ def execute_tool(tool_name: str, arguments: dict, network: str = "staging", real
     import inspect
     valid_params = set(inspect.signature(func).parameters.keys())
     
-    # Start with network, realm_folder, and realm_principal defaults
+    # Start with network, realm_folder, realm_principal, and identity defaults
     filtered_args = {
         "network": network,
         "realm_folder": realm_folder,
-        "realm_principal": realm_principal
+        "realm_principal": realm_principal,
+        "identity": user_identity
     }
     
     # Auto-fill voter_id from user_principal for voting tools (agent's identity)
@@ -918,8 +951,10 @@ def execute_tool(tool_name: str, arguments: dict, network: str = "staging", real
         if key in valid_params:
             filtered_args[key] = value
     
-    # Only pass realm_principal if the function accepts it
+    # Only pass parameters the function accepts
     if "realm_principal" not in valid_params:
         del filtered_args["realm_principal"]
+    if "identity" not in valid_params:
+        del filtered_args["identity"]
     
     return func(**filtered_args)
