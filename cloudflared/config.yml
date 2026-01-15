@@ -6,4 +6,6 @@ ingress:
     service: http://localhost:5000
   - hostname: geister-ollama.realmsgos.dev
     service: http://localhost:11434
+  - hostname: geister-ssh.realmsgos.dev
+    service: ssh://localhost:22
   - service: http_status:404
