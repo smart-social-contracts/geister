@@ -12,7 +12,8 @@ RUN apt-get install -y --no-install-recommends \
     ca-certificates \
     gnupg \
     lsb-release \
-    build-essential
+    build-essential \
+    zstd
 RUN apt-get install -y --no-install-recommends postgresql postgresql-contrib
 
 # --- Cloudflared installation ---
