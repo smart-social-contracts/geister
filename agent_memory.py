@@ -502,6 +502,43 @@ except:
     pass
 
 
+def _seed_default_telos_template():
+    """Seed the default Citizen Onboarding template if it doesn't exist."""
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            # Check if default template exists
+            cursor.execute("SELECT id FROM telos_templates WHERE name = 'Citizen Onboarding'")
+            if cursor.fetchone() is None:
+                # Create the default template
+                steps = [
+                    'Find a realm you like',
+                    'Join the realm',
+                    'Set your avatar',
+                    'Check pending invoices',
+                    'Pay pending invoices using the icw tool',
+                    'Vote on proposals',
+                    'Create a proposal'
+                ]
+                cursor.execute("""
+                    INSERT INTO telos_templates (name, description, steps, is_default)
+                    VALUES (%s, %s, %s, TRUE)
+                """, ('Citizen Onboarding', 'Steps for new citizens to get started', json.dumps(steps)))
+                conn.commit()
+    except Exception:
+        pass  # Template may already exist or DB not ready
+    finally:
+        if conn:
+            conn.close()
+
+# Seed default template on module load
+try:
+    _seed_default_telos_template()
+except:
+    pass
+
+
 def list_telos_templates() -> List[Dict]:
     """List all telos templates."""
     conn = None
