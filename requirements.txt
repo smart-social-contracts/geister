@@ -1,4 +1,5 @@
 ic-py
+internet-computer-wallet
 requests>=2.25.0
 psycopg2-binary
 pyyaml
