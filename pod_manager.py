@@ -520,8 +520,8 @@ class PodManager:
             pod_id, pod_url = self._find_pod_by_type(pod_type)
             
             if not pod_id:
-                self._print(f"❌ No {pod_type} pod found")
-                return False
+                self._print(f"ℹ️ No {pod_type} pod found to terminate")
+                return True
             
             self._print(f"Pod ID: {pod_id}")
             self._print(f"Server Host: {pod_url}")
