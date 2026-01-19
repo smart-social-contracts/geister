@@ -364,17 +364,47 @@
                     ).join('')}
                 `;
                 
-                document.getElementById('memories-list').innerHTML = memories.length ? memories.map(m => `
+                document.getElementById('memories-list').innerHTML = memories.length ? memories.map((m, idx) => {
+                    const memoryId = 'memory-detail-' + idx;
+                    const details = m.action_details || {};
+                    const debugChain = details.debug_chain || [];
+                    const hasDebugChain = debugChain.length > 0;
+                    
+                    return `
                     <div class="bg-white border border-primary-200 rounded p-4">
                         <div class="flex justify-between text-sm mb-2">
                             <span class="text-primary-700 font-medium">${m.action_type || 'action'}</span>
                             <span class="text-primary-400">${formatDate(m.created_at)}</span>
                         </div>
-                        <p class="text-primary-900">${m.action_summary || ''}</p>
+                        <p class="text-primary-900 font-medium">${m.action_summary || ''}</p>
                         ${m.observations ? `<p class="text-sm text-primary-500 mt-2">${m.observations}</p>` : ''}
                         ${m.emotional_state ? `<p class="text-xs text-primary-400 mt-1">Feeling: ${m.emotional_state}</p>` : ''}
-                    </div>
-                `).join('') : '<p class="text-primary-500 text-center py-8">No memories recorded</p>';
+                        ${hasDebugChain ? `
+                            <div class="mt-3 pt-3 border-t border-primary-100">
+                                <div class="debug-toggle flex items-center gap-1 text-xs text-primary-500 hover:text-primary-700 cursor-pointer" onclick="document.getElementById('${memoryId}').classList.toggle('hidden')">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                    <span>View conversation & thinking (${debugChain.length} steps)</span>
+                                </div>
+                                <div id="${memoryId}" class="hidden mt-2 debug-content bg-primary-50 border border-primary-200 rounded p-3">
+                                    ${renderMemoryDebugChain(debugChain)}
+                                </div>
+                            </div>
+                        ` : (details.question || details.step ? `
+                            <div class="mt-3 pt-3 border-t border-primary-100">
+                                <div class="debug-toggle flex items-center gap-1 text-xs text-primary-500 hover:text-primary-700 cursor-pointer" onclick="document.getElementById('${memoryId}').classList.toggle('hidden')">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                    <span>View details</span>
+                                </div>
+                                <div id="${memoryId}" class="hidden mt-2 bg-primary-50 border border-primary-200 rounded p-3 text-sm">
+                                    ${details.question ? `<div class="mb-2"><span class="text-primary-500 font-medium">Question:</span> <span class="text-primary-700">${escapeHtml(details.question)}</span></div>` : ''}
+                                    ${details.step ? `<div class="mb-2"><span class="text-primary-500 font-medium">Step:</span> <span class="text-primary-700">${escapeHtml(details.step)}</span></div>` : ''}
+                                    ${details.answer ? `<div class="mb-2"><span class="text-primary-500 font-medium">Answer:</span> <div class="text-primary-700 mt-1 whitespace-pre-wrap">${escapeHtml(details.answer)}</div></div>` : ''}
+                                    ${details.result ? `<div><span class="text-primary-500 font-medium">Result:</span> <div class="text-primary-700 mt-1 whitespace-pre-wrap">${escapeHtml(details.result)}</div></div>` : ''}
+                                </div>
+                            </div>
+                        ` : '')}
+                    </div>`;
+                }).join('') : '<p class="text-primary-500 text-center py-8">No memories recorded</p>';
                 
             } catch (e) {
                 document.getElementById('agent-title').textContent = 'Error';
@@ -455,6 +485,28 @@
             
             html += '</div></div>';
             return html;
+        }
+
+        function renderMemoryDebugChain(chain) {
+            if (!chain || chain.length === 0) return '<p class="text-primary-400 text-sm">No conversation details available</p>';
+            
+            let html = '';
+            for (const item of chain) {
+                if (item.type === 'assistant') {
+                    if (item.content) {
+                        html += `<div class="debug-item debug-thinking"><div class="text-purple-600 font-medium mb-1">💭 Thinking</div><div class="text-primary-700 whitespace-pre-wrap text-sm">${escapeHtml(item.content)}</div></div>`;
+                    }
+                    if (item.tool_calls) {
+                        for (const tc of item.tool_calls) {
+                            html += `<div class="debug-item debug-tool-call"><div class="text-amber-600 font-medium mb-1">🔧 Tool: ${escapeHtml(tc.name)}</div><pre class="text-primary-600 text-xs overflow-x-auto">${escapeHtml(JSON.stringify(tc.arguments, null, 2))}</pre></div>`;
+                        }
+                    }
+                } else if (item.type === 'tool_response') {
+                    const preview = item.content && item.content.length > 500 ? item.content.substring(0, 500) + '...' : (item.content || '');
+                    html += `<div class="debug-item debug-tool-response"><div class="text-emerald-600 font-medium mb-1">📥 Tool Response</div><pre class="text-primary-600 text-xs overflow-x-auto max-h-32 overflow-y-auto">${escapeHtml(preview)}</pre></div>`;
+                }
+            }
+            return html || '<p class="text-primary-400 text-sm">No conversation details available</p>';
         }
 
         async function sendChat() {

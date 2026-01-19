@@ -158,13 +158,48 @@ If you cannot complete the step (e.g., missing permissions, errors), explain why
                     "content": tool_result
                 })
         
-        # Save to agent memory
+        # Build debug chain from messages for memory storage
+        debug_chain = []
+        try:
+            for msg in messages[2:]:  # Skip system and initial user message
+                role = msg.get('role', 'unknown')
+                if role == 'assistant':
+                    chain_item = {'type': 'assistant', 'content': msg.get('content', '') or ''}
+                    if msg.get('tool_calls'):
+                        tool_calls_list = []
+                        for tc in msg.get('tool_calls', []):
+                            args = tc.get('function', {}).get('arguments', {})
+                            if isinstance(args, str):
+                                try:
+                                    args = json.loads(args)
+                                except:
+                                    args = {'raw': args}
+                            tool_calls_list.append({
+                                'name': tc.get('function', {}).get('name', 'unknown'),
+                                'arguments': args
+                            })
+                        chain_item['tool_calls'] = tool_calls_list
+                    debug_chain.append(chain_item)
+                elif role == 'tool':
+                    content = msg.get('content', '') or ''
+                    if len(content) > 2000:
+                        content = content[:2000] + '... (truncated)'
+                    debug_chain.append({'type': 'tool_response', 'content': content})
+        except Exception as debug_err:
+            log(f"  Warning: Could not build debug chain: {debug_err}")
+            debug_chain = []
+        
+        # Save to agent memory with full conversation chain
         try:
             memory = AgentMemory(agent_id)
             memory.remember(
                 action_type="telos_step",
                 action_summary=f"Completed: {step_text}",
-                action_details={"step": step_text, "result": final_answer},
+                action_details={
+                    "step": step_text, 
+                    "result": final_answer,
+                    "debug_chain": debug_chain
+                },
                 observations=final_answer[:200] if final_answer else ""
             )
             memory.close()

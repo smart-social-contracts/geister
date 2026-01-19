@@ -301,7 +301,7 @@ CRITICAL IDENTITY RULES:
     
     return prompt
 
-def save_to_conversation(user_principal, realm_principal, question, answer, prompt=None, persona_name=None, agent_id=None):
+def save_to_conversation(user_principal, realm_principal, question, answer, prompt=None, persona_name=None, agent_id=None, debug_chain=None):
     """Save Q&A to conversation history with persona and agent information"""
     try:
         db_client.store_conversation(
@@ -325,7 +325,11 @@ def save_to_conversation(user_principal, realm_principal, question, answer, prom
                 memory.remember(
                     action_type="conversation",
                     action_summary=f"Asked: {q_summary}",
-                    action_details={"question": question, "answer": answer},
+                    action_details={
+                        "question": question, 
+                        "answer": answer,
+                        "debug_chain": debug_chain or []
+                    },
                     realm_principal=realm_principal,
                     observations=a_summary
                 )
@@ -515,10 +519,7 @@ def ask():
             
             log(f"Final answer: {answer}")
             
-            # Save to conversation history with persona and agent info
-            save_to_conversation(user_principal, realm_principal, question, answer, prompt, actual_persona_name, agent_id)
-            
-            # Build debug chain for frontend
+            # Build debug chain for frontend AND memory storage
             debug_chain = []
             try:
                 for msg in messages[2:]:  # Skip system and initial user message
@@ -550,6 +551,9 @@ def ask():
             except Exception as debug_err:
                 log(f"Error building debug chain: {debug_err}")
                 debug_chain = []
+            
+            # Save to conversation history with persona, agent info, and debug chain
+            save_to_conversation(user_principal, realm_principal, question, answer, prompt, actual_persona_name, agent_id, debug_chain)
             
             duration_ms = int((time_module.time() - start_time) * 1000)
             
