@@ -350,6 +350,41 @@ def db_schema(network: str = "staging", realm_folder: str = ".") -> str:
     )
 
 
+def find_objects(class_name: str, params: list = None, network: str = "staging", realm_folder: str = ".", realm_principal: str = "", identity: str = "") -> str:
+    """Search for objects matching given field criteria.
+    
+    Args:
+        class_name: Name of the entity class (e.g., "User", "Transfer", "Mandate")
+        params: List of [field_name, field_value] pairs to match
+        network: Network to use
+        realm_folder: Working directory with dfx.json
+        realm_principal: Canister ID for realm
+        identity: dfx identity to use
+    
+    Returns:
+        JSON string with matching objects or error
+    """
+    # Build the Candid vector of records for params
+    if params:
+        # Convert list of [field, value] pairs to Candid format
+        param_records = "; ".join(
+            f'record {{ 0 = "{p[0]}"; 1 = "{p[1]}"; }}' for p in params
+        )
+        args = f'("{class_name}", vec {{ {param_records} }})'
+    else:
+        args = f'("{class_name}", vec {{}})'
+    
+    return _run_dfx_call(
+        canister="realm_backend",
+        method="find_objects",
+        args=args,
+        network=network,
+        realm_folder=realm_folder,
+        realm_principal=realm_principal,
+        identity=identity
+    )
+
+
 # =============================================================================
 # Governance / Voting Tools
 # =============================================================================
@@ -667,6 +702,33 @@ REALM_TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "find_objects",
+            "description": "Search for objects matching given field criteria. More flexible than db_get - allows filtering by any field values. Use db_schema first to discover available entity types and their fields.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "class_name": {
+                        "type": "string",
+                        "description": "Name of the entity class (e.g., 'User', 'Transfer', 'Mandate', 'Proposal')"
+                    },
+                    "params": {
+                        "type": "array",
+                        "description": "List of [field_name, field_value] pairs to match. Example: [['id', 'system'], ['status', 'active']]",
+                        "items": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 2,
+                            "maxItems": 2
+                        }
+                    }
+                },
+                "required": ["class_name"]
+            }
+        }
+    },
     # Governance / Voting Tools
     {
         "type": "function",
@@ -893,6 +955,7 @@ TOOL_FUNCTIONS = {
     "realm_status": realm_status,
     "db_schema": db_schema,
     "db_get": db_get,
+    "find_objects": find_objects,
     # Governance
     "get_proposals": get_proposals,
     "get_proposal": get_proposal,
