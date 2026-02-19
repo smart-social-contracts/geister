@@ -2,6 +2,14 @@
 
 AI governance agents for [Realms](https://github.com/smart-social-contracts/realms).
 
+![Geister Swarm Dashboard](docs/dashboard.png)
+
+![Agent Chat](docs/agent-chat.png)
+
+![Agent Activity](docs/agent-activity.png)
+
+![Agent Telos](docs/agent-telos.png)
+
 ## Installation
 
 ```bash
@@ -11,8 +19,17 @@ pip install -e .
 ## Quick Start
 
 ```bash
+# Load secrets (must be sourced, not executed)
+source ./load_secret_envs.sh
+
+# Start the RunPod instance (deploys a new one if none exists - takes a few minutes)
+geister pod start main --deploy-new --verbose
+
 # Check status
-geister status --check
+geister status
+
+# Check dashboard
+https://geister-api.realmsgos.dev/dashboard
 
 # Generate agents
 geister agent generate 10
