@@ -2,13 +2,25 @@
 
 AI governance agents for [Realms](https://github.com/smart-social-contracts/realms).
 
+Swarm dashboard showing agent status, persona distribution, and telos executor controls.
+
 ![Geister Swarm Dashboard](docs/dashboard.png)
+
+Chat interface for interacting with individual agents in real time.
 
 ![Agent Chat](docs/agent-chat.png)
 
+Agent activity log with conversation history, telos step completions, and tool calls.
+
 ![Agent Activity](docs/agent-activity.png)
 
+Telos tab showing the agent's current mission progress and step-by-step onboarding.
+
 ![Agent Telos](docs/agent-telos.png)
+
+Telos execution log with live updates across all agents in the swarm.
+
+![Telos Execution Log](docs/telos-log.png)
 
 ## Installation
 

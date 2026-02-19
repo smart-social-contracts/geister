@@ -110,6 +110,12 @@
         </div>
     </main>
 
+    <footer class="text-center text-primary-400 text-sm py-6 border-t border-primary-200 space-y-1">
+        <p><a href="https://github.com/smart-social-contracts/geister" target="_blank" class="hover:text-primary-600">&#xf09b;</a></p>
+        <p id="footer-version">Geister</p>
+        <p>&#x267E;&#xFE0F; Built on the Internet Computer</p>
+    </footer>
+
     <script>
         const API_BASE = window.location.origin;
         const pathParts = window.location.pathname.split('/');
@@ -232,9 +238,24 @@
             });
         }
 
+        async function fetchFooterVersion() {
+            try {
+                const res = await fetch(`${API_BASE}/`);
+                const data = await res.json();
+                const version = data.version || 'unknown';
+                const commit = data.git_commit || '';
+                const datetime = data.git_commit_datetime || '';
+                let text = `Geister ${version}`;
+                if (commit) text += ` (${commit})`;
+                if (datetime) text += ` - ${datetime}`;
+                document.getElementById('footer-version').textContent = text;
+            } catch (e) {}
+        }
+
         // Load on start
         loadPersona();
         loadAllPersonas();
+        fetchFooterVersion();
     </script>
 </body>
 </html>

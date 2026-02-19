@@ -364,8 +364,10 @@
         </div>
     </div>
 
-    <footer class="text-center text-primary-500 text-sm py-6 border-t border-primary-200">
-        <p>Geister Swarm Dashboard</p>
+    <footer class="text-center text-primary-400 text-sm py-6 border-t border-primary-200 space-y-1">
+        <p><a href="https://github.com/smart-social-contracts/geister" target="_blank" class="hover:text-primary-600">&#xf09b;</a></p>
+        <p id="footer-version">Geister</p>
+        <p>&#x267E;&#xFE0F; Built on the Internet Computer</p>
     </footer>
 
     <script>
@@ -409,6 +411,12 @@
                 const version = data.version || 'unknown';
                 const commit = data.git_commit ? ` (${data.git_commit})` : '';
                 document.getElementById('version-info').textContent = `v${version}${commit}`;
+                // Update footer with version, commit, and datetime
+                const commitDatetime = data.git_commit_datetime || '';
+                const footerParts = [`Geister ${version}`];
+                if (data.git_commit) footerParts[0] += ` (${data.git_commit})`;
+                if (commitDatetime) footerParts[0] += ` - ${commitDatetime}`;
+                document.getElementById('footer-version').textContent = footerParts[0];
                 document.getElementById('inactivity').textContent = data.inactivity_timeout_seconds > 0 ? `${Math.floor((data.seconds_since_last_activity || 0) / 60)}m` : 'Disabled';
                 hideError();
             } catch (e) {
