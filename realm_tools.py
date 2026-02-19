@@ -250,6 +250,179 @@ def search_realm(query: str, network: str = "staging", realm_folder: str = ".") 
         return json.dumps({"error": str(e)})
 
 
+def registry_get_credits(principal_id: str, network: str = "staging", realm_folder: str = ".") -> str:
+    """Get credit balance for a principal from the registry."""
+    import re
+    cmd = ["realms", "registry", "billing", "balance", "--principal", principal_id, "--network", network]
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=realm_folder,
+            env=_get_env()
+        )
+        output = result.stdout + result.stderr
+        
+        # Parse balance from rich output
+        balance_match = re.search(r'Balance\s+(\d+)', output)
+        total_purchased_match = re.search(r'Total Purchased\s+(\d+)', output)
+        total_spent_match = re.search(r'Total Spent\s+(\d+)', output)
+        
+        if balance_match:
+            return json.dumps({
+                "balance": int(balance_match.group(1)),
+                "total_purchased": int(total_purchased_match.group(1)) if total_purchased_match else 0,
+                "total_spent": int(total_spent_match.group(1)) if total_spent_match else 0,
+            })
+        elif "Error" in output:
+            return json.dumps({"error": output.strip()})
+        else:
+            return json.dumps({"error": "Could not parse balance", "raw_output": output.strip()})
+    except subprocess.TimeoutExpired:
+        return json.dumps({"error": "Command timed out"})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+def registry_redeem_voucher(
+    principal_id: str,
+    code: str,
+    billing_url: str = "https://billing.realmsgos.dev",
+    network: str = "staging",
+    realm_folder: str = ".",
+) -> str:
+    """Redeem a voucher code to add credits to the agent's balance."""
+    cmd = [
+        "realms", "registry", "billing", "redeem_voucher",
+        "--principal", principal_id,
+        "--code", code,
+        "--billing-url", billing_url,
+    ]
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=realm_folder,
+            env=_get_env()
+        )
+        output = result.stdout + result.stderr
+        
+        if result.returncode == 0:
+            # Parse credits from output
+            import re
+            credits_match = re.search(r'Credits added:\s*(\d+)', output)
+            credits = int(credits_match.group(1)) if credits_match else 0
+            return json.dumps({"success": True, "message": output.strip(), "credits_added": credits})
+        else:
+            return json.dumps({"error": output.strip()})
+    except subprocess.TimeoutExpired:
+        return json.dumps({"error": "Command timed out"})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+def registry_deploy_realm(
+    principal_id: str,
+    realm_name: str,
+    management_url: str = "https://management.realmsgos.dev",
+    network: str = "staging",
+    realm_folder: str = ".",
+) -> str:
+    """Deploy a new realm via the management service. Returns a deployment_id for status polling."""
+    cmd = [
+        "realms", "registry", "realm", "deploy-realm",
+        "--principal", principal_id,
+        "--name", realm_name,
+        "--management-url", management_url,
+    ]
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=realm_folder,
+            env=_get_env()
+        )
+        output = result.stdout + result.stderr
+        
+        if result.returncode == 0:
+            # Parse deployment ID from output
+            import re
+            dep_id_match = re.search(r'Deployment ID:\s*(\S+)', output)
+            deployment_id = dep_id_match.group(1) if dep_id_match else None
+            return json.dumps({
+                "success": True,
+                "deployment_id": deployment_id,
+                "message": "Deployment started. Use registry_deploy_status to poll for completion.",
+            })
+        else:
+            return json.dumps({"error": output.strip()})
+    except subprocess.TimeoutExpired:
+        return json.dumps({"error": "Command timed out"})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+def registry_deploy_status(
+    deployment_id: str,
+    management_url: str = "https://management.realmsgos.dev",
+    wait: bool = True,
+    network: str = "staging",
+    realm_folder: str = ".",
+) -> str:
+    """Check deployment status. With wait=True, polls until completed or failed (up to 15 min)."""
+    cmd = [
+        "realms", "registry", "realm", "deploy-status",
+        "--deployment-id", deployment_id,
+        "--management-url", management_url,
+    ]
+    
+    if wait:
+        cmd.extend(["--wait", "--poll-interval", "15", "--max-wait", "900"])
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=960,  # slightly longer than max-wait
+            cwd=realm_folder,
+            env=_get_env()
+        )
+        output = result.stdout + result.stderr
+        
+        # Parse status from output
+        import re
+        status_match = re.search(r'Status\s+(completed|failed|in_progress|pending)', output)
+        url_match = re.search(r'Realm URL\s+(https?://\S+)', output)
+        realm_id_match = re.search(r'Realm ID\s+(\S+)', output)
+        error_match = re.search(r'Error\s+(.+)', output)
+        
+        status = status_match.group(1) if status_match else "unknown"
+        
+        result_data = {"status": status}
+        if url_match:
+            result_data["realm_url"] = url_match.group(1)
+        if realm_id_match:
+            result_data["realm_id"] = realm_id_match.group(1)
+        if error_match and status == "failed":
+            result_data["error"] = error_match.group(1).strip()
+        
+        return json.dumps(result_data)
+    except subprocess.TimeoutExpired:
+        return json.dumps({"error": "Deployment status polling timed out (>15 min)"})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
 # =============================================================================
 # Citizen Tools
 # =============================================================================
@@ -607,6 +780,87 @@ REALM_TOOLS = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "registry_get_credits",
+            "description": "Check the agent's credit balance in the registry. Credits are needed to deploy realms (5 credits per realm).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "principal_id": {
+                        "type": "string",
+                        "description": "Principal ID to check credits for"
+                    }
+                },
+                "required": ["principal_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "registry_redeem_voucher",
+            "description": "Redeem a voucher code to add credits to the agent's balance. Use code 'BETA50' for 50 credits.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "principal_id": {
+                        "type": "string",
+                        "description": "Principal ID to add credits to"
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": "Voucher code to redeem (e.g., 'BETA50', 'WELCOME10', 'TEST5')"
+                    }
+                },
+                "required": ["principal_id", "code"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "registry_deploy_realm",
+            "description": "Deploy a new realm via the management service. Returns a deployment_id. The realm will appear in the dashboard. Requires credits (5 per realm). Call registry_deploy_status afterwards to wait for completion.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "principal_id": {
+                        "type": "string",
+                        "description": "Principal ID of the deployer"
+                    },
+                    "realm_name": {
+                        "type": "string",
+                        "description": "Name for the new realm"
+                    }
+                },
+                "required": ["principal_id", "realm_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "registry_deploy_status",
+            "description": "Check or wait for a realm deployment to complete. With wait=true, polls every 15 seconds until done (up to 15 minutes). Returns the realm URL on success.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "deployment_id": {
+                        "type": "string",
+                        "description": "Deployment ID returned by registry_deploy_realm"
+                    },
+                    "wait": {
+                        "type": "boolean",
+                        "description": "If true, wait for deployment to complete (polls periodically). Default: true.",
+                        "default": True
+                    }
+                },
+                "required": ["deployment_id"]
+            }
+        }
+    },
     # Citizen Tools
     {
         "type": "function",
@@ -946,6 +1200,10 @@ TOOL_FUNCTIONS = {
     # Registry/Mundus
     "list_realms": list_realms,
     "search_realm": search_realm,
+    "registry_get_credits": registry_get_credits,
+    "registry_redeem_voucher": registry_redeem_voucher,
+    "registry_deploy_realm": registry_deploy_realm,
+    "registry_deploy_status": registry_deploy_status,
     # Citizen
     "join_realm": join_realm,
     "set_profile_picture": set_profile_picture,
