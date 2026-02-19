@@ -941,6 +941,19 @@ REALM_TOOLS = [
     }
 ]
 
+# Inject realm_id parameter into all realm-specific tool definitions
+# This allows the LLM to specify which realm canister to interact with
+_REALM_ID_PARAM = {
+    "type": "string",
+    "description": "Canister ID of the realm to interact with (from list_realms results). Always pass this when targeting a specific realm."
+}
+_REGISTRY_ONLY_TOOLS = {"list_realms", "search_realm", "icw_check_balance", "icw_transfer_tokens", "icw_get_address"}
+for _tool in REALM_TOOLS:
+    _func_name = _tool["function"]["name"]
+    if _func_name not in _REGISTRY_ONLY_TOOLS:
+        _tool["function"]["parameters"]["properties"]["realm_id"] = _REALM_ID_PARAM
+
+
 # Map function names to actual functions
 TOOL_FUNCTIONS = {
     # Registry/Mundus
@@ -987,6 +1000,12 @@ def execute_tool(tool_name: str, arguments: dict, network: str = "staging", real
     """
     if tool_name not in TOOL_FUNCTIONS:
         return json.dumps({"error": f"Unknown tool '{tool_name}'"})
+    
+    # If LLM passes realm_id in arguments, use it as realm_principal
+    if 'realm_id' in arguments:
+        llm_realm_id = arguments.pop('realm_id', '')
+        if llm_realm_id:
+            realm_principal = llm_realm_id
     
     # Filter to only valid arguments for the function
     func = TOOL_FUNCTIONS[tool_name]

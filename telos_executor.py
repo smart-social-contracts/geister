@@ -91,7 +91,9 @@ You have a mission (telos) to complete. Your current step is:
 Complete this step by using the available tools. Be concise and action-oriented.
 After completing the step, summarize what you did in 1-2 sentences.
 
-If you cannot complete the step (e.g., missing permissions, errors), explain why briefly."""
+If you cannot complete the step (e.g., missing permissions, errors), explain why briefly.
+
+IMPORTANT: When interacting with a specific realm, you MUST pass the realm_id parameter (the canister ID from list_realms results) to every tool call. Without realm_id, your calls may go to the wrong realm. Always call list_realms first to get the correct canister IDs, then pass the chosen realm's id as realm_id in subsequent calls."""
 
         user_message = f"Please complete this step of your mission: {step_text}"
         
