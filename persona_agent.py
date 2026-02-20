@@ -174,6 +174,14 @@ As a WATCHFUL citizen, your Phase 2 actions:
 - Look for transparency gaps
 - Document your concerns and observations
 - Suggest improvements for accountability
+""",
+        "founder": """
+As a FOUNDER, your Phase 2 actions:
+- Redeem voucher code BETA50 to get credits for deploying a realm
+- Check your credit balance to confirm you have enough credits
+- Deploy a new realm with a creative name of your choosing
+- Wait for the deployment to complete using registry_deploy_status with wait=true
+- Once the realm is live, join it as admin
 """
     }
     
