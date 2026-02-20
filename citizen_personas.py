@@ -80,11 +80,12 @@ def load_citizen_personas(personas_dir: Path = PERSONAS_DIR) -> Dict[str, Citize
         print(f"Warning: Personas directory not found: {personas_dir}")
         return personas
     
-    for filepath in personas_dir.glob("citizen-*.yaml"):
-        persona = load_persona_from_file(filepath)
-        if persona:
-            key = persona.name.lower()
-            personas[key] = persona
+    for pattern in ["*.yaml", "*.yml"]:
+        for filepath in personas_dir.glob(pattern):
+            persona = load_persona_from_file(filepath)
+            if persona:
+                key = persona.name.lower()
+                personas[key] = persona
     
     return personas
 
