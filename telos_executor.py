@@ -82,20 +82,25 @@ def execute_telos_step(agent_id: str, step_text: str, agent_data: Dict) -> Dict[
         display_name = agent_data.get('display_name', agent_id)
         persona = agent_data.get('persona', 'compliant')
         
+        # Get agent's principal for tool context
+        agent_principal = agent_data.get('principal', '')
+        
         # Build the prompt for this step
         system_prompt = f"""You are {display_name}, a {persona} AI agent in the Realms ecosystem.
+Your principal ID is: {agent_principal}
 
 You have a mission (telos) to complete. Your current step is:
 "{step_text}"
 
-Complete this step by using the available tools. Be concise and action-oriented.
-After completing the step, summarize what you did in 1-2 sentences.
+IMPORTANT RULES:
+- You MUST call the appropriate tool function to complete this step. DO NOT just describe what you would do.
+- Use your principal ID ({agent_principal}) when tools require a principal_id parameter.
+- After the tool returns a result, summarize what happened in 1-2 sentences.
+- If the tool returns an error, explain the error briefly.
+- NEVER respond with just text. Always call a tool first.
+- When interacting with a specific realm, you MUST pass the realm_id parameter (the canister ID from list_realms results) to every tool call. Without realm_id, your calls may go to the wrong realm. Always call list_realms first to get the correct canister IDs, then pass the chosen realm's id as realm_id in subsequent calls."""
 
-If you cannot complete the step (e.g., missing permissions, errors), explain why briefly.
-
-IMPORTANT: When interacting with a specific realm, you MUST pass the realm_id parameter (the canister ID from list_realms results) to every tool call. Without realm_id, your calls may go to the wrong realm. Always call list_realms first to get the correct canister IDs, then pass the chosen realm's id as realm_id in subsequent calls."""
-
-        user_message = f"Please complete this step of your mission: {step_text}"
+        user_message = f"Execute this step NOW by calling the appropriate tool function. Your principal is {agent_principal}. Step: {step_text}"
         
         messages = [
             {"role": "system", "content": system_prompt},
@@ -106,6 +111,7 @@ IMPORTANT: When interacting with a specific realm, you MUST pass the realm_id pa
         max_iterations = 5
         iteration = 0
         final_answer = None
+        tools_called = []
         
         while iteration < max_iterations:
             iteration += 1
@@ -127,13 +133,26 @@ IMPORTANT: When interacting with a specific realm, you MUST pass the realm_id pa
             content = assistant_message.get('content', '')
             tool_calls = assistant_message.get('tool_calls', [])
             
-            # If we have content and no more tool calls, we're done
-            if content and not tool_calls:
+            # If no tool calls on first iteration, the LLM is just chatting
+            # Retry with a stronger nudge
+            if not tool_calls and iteration == 1 and not tools_called:
+                log(f"  [{display_name}] No tool call on first try, nudging...")
+                messages.append({
+                    "role": "user",
+                    "content": f"You MUST call a tool function now. Do not describe what to do - actually call the tool. Your principal_id is {agent_principal}. Call the tool for: {step_text}"
+                })
+                continue
+            
+            # If we already called tools and now have a text response, we're done
+            if content and not tool_calls and tools_called:
                 final_answer = content
                 break
             
+            # If still no tool calls after nudging, accept text but log warning
             if not tool_calls:
-                final_answer = content or "Step completed."
+                final_answer = content or "Step completed (no tool called)."
+                if not tools_called:
+                    log(f"  [{display_name}] WARNING: No tools were called for this step")
                 break
             
             # Execute tool calls
@@ -141,10 +160,8 @@ IMPORTANT: When interacting with a specific realm, you MUST pass the realm_id pa
                 tool_name = tool_call['function']['name']
                 tool_args = tool_call['function']['arguments']
                 
-                log(f"  [{display_name}] Tool: {tool_name}")
-                
-                # Get agent's principal and identity for tool calls
-                agent_principal = agent_data.get('principal', '')
+                log(f"  [{display_name}] Tool: {tool_name}({json.dumps(tool_args)[:100]})")
+                tools_called.append(tool_name)
                 
                 tool_result = execute_tool(
                     tool_name, 
@@ -154,6 +171,8 @@ IMPORTANT: When interacting with a specific realm, you MUST pass the realm_id pa
                     user_principal=agent_principal,
                     user_identity=agent_id  # Use agent's dfx identity for calls
                 )
+                
+                log(f"  [{display_name}] Result: {tool_result[:150]}")
                 
                 messages.append({
                     "role": "tool",
