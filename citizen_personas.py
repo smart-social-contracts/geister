@@ -14,7 +14,7 @@ from pathlib import Path
 
 @dataclass
 class CitizenPersona:
-    """A citizen persona with defined behavioral patterns."""
+    """A persona with defined behavioral patterns."""
     name: str
     emoji: str
     description: str
@@ -22,6 +22,7 @@ class CitizenPersona:
     system_prompt: str
     traits: Dict[str, float]
     strategies: Dict[str, str]
+    persona_type: str = "citizen"
     
     @property
     def risk_tolerance(self) -> float:
@@ -65,7 +66,8 @@ def load_persona_from_file(filepath: Path) -> Optional[CitizenPersona]:
             motivation=data.get("motivation", ""),
             system_prompt=data.get("system_prompt", ""),
             traits=data.get("traits", {}),
-            strategies=data.get("strategies", {})
+            strategies=data.get("strategies", {}),
+            persona_type=data.get("type", "citizen")
         )
     except Exception as e:
         print(f"Error loading persona from {filepath}: {e}")
@@ -110,6 +112,14 @@ def get_persona(name: str) -> Optional[CitizenPersona]:
 def list_personas() -> List[str]:
     """List all available persona names."""
     return list(get_personas().keys())
+
+
+def get_personas_by_type(persona_type: str) -> Dict[str, CitizenPersona]:
+    """Get all personas of a given type (assistant, citizen, admin)."""
+    return {
+        name: p for name, p in get_personas().items()
+        if p.persona_type == persona_type
+    }
 
 
 def reload_personas() -> Dict[str, CitizenPersona]:
