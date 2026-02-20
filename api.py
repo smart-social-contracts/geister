@@ -1125,6 +1125,34 @@ def list_personas():
         log(f"Error listing personas: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/personas/all', methods=['GET'])
+def list_all_typed_personas():
+    """List all personas with their types for the dashboard dropdown."""
+    update_activity()
+    
+    try:
+        from citizen_personas import get_personas
+        all_personas = get_personas()
+        
+        result = []
+        for key, persona in all_personas.items():
+            result.append({
+                "id": key,
+                "name": persona.name,
+                "emoji": persona.emoji,
+                "description": persona.description,
+                "type": persona.persona_type,
+            })
+        
+        return jsonify({
+            "success": True,
+            "personas": result,
+            "count": len(result)
+        })
+    except Exception as e:
+        log(f"Error listing all personas: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/personas/assistants', methods=['GET'])
 def list_assistant_personas():
     """List all available assistant-type personas for the llm_chat extension."""
