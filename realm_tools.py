@@ -259,7 +259,7 @@ def registry_get_credits(principal_id: str, network: str = "staging", realm_fold
         if resp.status_code == 200:
             data = resp.json()
             return json.dumps({
-                "balance": data.get("balance", 0),
+                "balance": data.get("credits", data.get("balance", 0)),
                 "total_purchased": data.get("total_purchased", 0),
                 "total_spent": data.get("total_spent", 0),
             })
