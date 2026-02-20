@@ -221,6 +221,7 @@
                                 <option value="compliant">Compliant</option>
                                 <option value="watchful">Watchful</option>
                                 <option value="exploiter">Exploiter</option>
+                                <option value="founder">Founder</option>
                             </select>
                         </div>
                     </div>
@@ -285,6 +286,7 @@
                         <option value="compliant">Compliant</option>
                         <option value="watchful">Watchful</option>
                         <option value="exploiter">Exploiter</option>
+                        <option value="founder">Founder</option>
                     </select>
                 </div>
                 
@@ -377,8 +379,8 @@
         let currentPage = 1;
         const PAGE_SIZE = 5;
 
-        const personaEmoji = { 'compliant': '🐑', 'watchful': '🦊', 'exploiter': '🦅', 'unknown': '❓' };
-        const personaColors = { 'compliant': 'bg-green-100 text-green-700', 'watchful': 'bg-yellow-100 text-yellow-700', 'exploiter': 'bg-red-100 text-red-700', 'unknown': 'bg-primary-100 text-primary-700' };
+        const personaEmoji = { 'compliant': '🐑', 'watchful': '🦊', 'exploiter': '🦅', 'founder': '🏗️', 'unknown': '❓' };
+        const personaColors = { 'compliant': 'bg-green-100 text-green-700', 'watchful': 'bg-yellow-100 text-yellow-700', 'exploiter': 'bg-red-100 text-red-700', 'founder': 'bg-blue-100 text-blue-700', 'unknown': 'bg-primary-100 text-primary-700' };
 
         function showError(msg) {
             document.getElementById('error-banner').classList.remove('hidden');
