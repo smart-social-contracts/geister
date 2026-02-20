@@ -307,7 +307,12 @@ def registry_deploy_realm(
     try:
         resp = requests.post(
             f"{management_url}/api/deploy",
-            json={"principal_id": principal_id, "realm_name": realm_name},
+            json={
+                "principal_id": principal_id,
+                "realm_config": {
+                    "name": realm_name,
+                }
+            },
             timeout=120
         )
         if resp.status_code == 200:
