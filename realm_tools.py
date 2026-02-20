@@ -250,39 +250,20 @@ def search_realm(query: str, network: str = "staging", realm_folder: str = ".") 
         return json.dumps({"error": str(e)})
 
 
-def registry_get_credits(principal_id: str, network: str = "staging", realm_folder: str = ".") -> str:
+def registry_get_credits(principal_id: str, network: str = "staging", realm_folder: str = ".",
+                        billing_url: str = "https://billing.realmsgos.dev") -> str:
     """Get credit balance for a principal from the registry."""
-    import re
-    cmd = ["realms", "registry", "billing", "balance", "--principal", principal_id, "--network", network]
-    
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=realm_folder,
-            env=_get_env()
-        )
-        output = result.stdout + result.stderr
-        
-        # Parse balance from rich output
-        balance_match = re.search(r'Balance\s+(\d+)', output)
-        total_purchased_match = re.search(r'Total Purchased\s+(\d+)', output)
-        total_spent_match = re.search(r'Total Spent\s+(\d+)', output)
-        
-        if balance_match:
+        resp = requests.get(f"{billing_url}/credits/{principal_id}", timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
             return json.dumps({
-                "balance": int(balance_match.group(1)),
-                "total_purchased": int(total_purchased_match.group(1)) if total_purchased_match else 0,
-                "total_spent": int(total_spent_match.group(1)) if total_spent_match else 0,
+                "balance": data.get("balance", 0),
+                "total_purchased": data.get("total_purchased", 0),
+                "total_spent": data.get("total_spent", 0),
             })
-        elif "Error" in output:
-            return json.dumps({"error": output.strip()})
         else:
-            return json.dumps({"error": "Could not parse balance", "raw_output": output.strip()})
-    except subprocess.TimeoutExpired:
-        return json.dumps({"error": "Command timed out"})
+            return json.dumps({"error": f"HTTP {resp.status_code}: {resp.text[:200]}"})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -295,34 +276,21 @@ def registry_redeem_voucher(
     realm_folder: str = ".",
 ) -> str:
     """Redeem a voucher code to add credits to the agent's balance."""
-    cmd = [
-        "realms", "registry", "billing", "redeem_voucher",
-        "--principal", principal_id,
-        "--code", code,
-        "--billing-url", billing_url,
-    ]
-    
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=realm_folder,
-            env=_get_env()
+        resp = requests.post(
+            f"{billing_url}/voucher/redeem",
+            json={"principal_id": principal_id, "code": code},
+            timeout=30
         )
-        output = result.stdout + result.stderr
-        
-        if result.returncode == 0:
-            # Parse credits from output
-            import re
-            credits_match = re.search(r'Credits added:\s*(\d+)', output)
-            credits = int(credits_match.group(1)) if credits_match else 0
-            return json.dumps({"success": True, "message": output.strip(), "credits_added": credits})
+        if resp.status_code == 200:
+            data = resp.json()
+            return json.dumps({
+                "success": True,
+                "credits_added": data.get("credits_added", 0),
+                "message": f"Voucher {code} redeemed successfully"
+            })
         else:
-            return json.dumps({"error": output.strip()})
-    except subprocess.TimeoutExpired:
-        return json.dumps({"error": "Command timed out"})
+            return json.dumps({"error": f"HTTP {resp.status_code}: {resp.text[:200]}"})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -335,38 +303,21 @@ def registry_deploy_realm(
     realm_folder: str = ".",
 ) -> str:
     """Deploy a new realm via the management service. Returns a deployment_id for status polling."""
-    cmd = [
-        "realms", "registry", "realm", "deploy-realm",
-        "--principal", principal_id,
-        "--name", realm_name,
-        "--management-url", management_url,
-    ]
-    
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=120,
-            cwd=realm_folder,
-            env=_get_env()
+        resp = requests.post(
+            f"{management_url}/api/deploy",
+            json={"principal_id": principal_id, "realm_name": realm_name},
+            timeout=120
         )
-        output = result.stdout + result.stderr
-        
-        if result.returncode == 0:
-            # Parse deployment ID from output
-            import re
-            dep_id_match = re.search(r'Deployment ID:\s*(\S+)', output)
-            deployment_id = dep_id_match.group(1) if dep_id_match else None
+        if resp.status_code == 200:
+            data = resp.json()
             return json.dumps({
                 "success": True,
-                "deployment_id": deployment_id,
+                "deployment_id": data.get("deployment_id"),
                 "message": "Deployment started. Use registry_deploy_status to poll for completion.",
             })
         else:
-            return json.dumps({"error": output.strip()})
-    except subprocess.TimeoutExpired:
-        return json.dumps({"error": "Command timed out"})
+            return json.dumps({"error": f"HTTP {resp.status_code}: {resp.text[:200]}"})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -379,46 +330,44 @@ def registry_deploy_status(
     realm_folder: str = ".",
 ) -> str:
     """Check deployment status. With wait=True, polls until completed or failed (up to 15 min)."""
-    cmd = [
-        "realms", "registry", "realm", "deploy-status",
-        "--deployment-id", deployment_id,
-        "--management-url", management_url,
-    ]
-    
-    if wait:
-        cmd.extend(["--wait", "--poll-interval", "15", "--max-wait", "900"])
+    import time
+    max_wait = 900  # 15 minutes
+    poll_interval = 15
+    start_time = time.time()
     
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=960,  # slightly longer than max-wait
-            cwd=realm_folder,
-            env=_get_env()
-        )
-        output = result.stdout + result.stderr
+        while True:
+            resp = requests.get(
+                f"{management_url}/api/deploy/{deployment_id}",
+                timeout=30
+            )
+            if resp.status_code != 200:
+                return json.dumps({"error": f"HTTP {resp.status_code}: {resp.text[:200]}"})
+            
+            data = resp.json()
+            status = data.get("status", "unknown")
         
-        # Parse status from output
-        import re
-        status_match = re.search(r'Status\s+(completed|failed|in_progress|pending)', output)
-        url_match = re.search(r'Realm URL\s+(https?://\S+)', output)
-        realm_id_match = re.search(r'Realm ID\s+(\S+)', output)
-        error_match = re.search(r'Error\s+(.+)', output)
-        
-        status = status_match.group(1) if status_match else "unknown"
-        
-        result_data = {"status": status}
-        if url_match:
-            result_data["realm_url"] = url_match.group(1)
-        if realm_id_match:
-            result_data["realm_id"] = realm_id_match.group(1)
-        if error_match and status == "failed":
-            result_data["error"] = error_match.group(1).strip()
-        
-        return json.dumps(result_data)
-    except subprocess.TimeoutExpired:
-        return json.dumps({"error": "Deployment status polling timed out (>15 min)"})
+            result_data = {
+                "status": status,
+                "deployment_id": deployment_id,
+            }
+            if data.get("realm_url"):
+                result_data["realm_url"] = data["realm_url"]
+            if data.get("realm_id"):
+                result_data["realm_id"] = data["realm_id"]
+            if data.get("error"):
+                result_data["error"] = data["error"][:200]
+            
+            # If not waiting or deployment finished, return immediately
+            if not wait or status in ("completed", "failed"):
+                return json.dumps(result_data)
+            
+            # Check timeout
+            if time.time() - start_time > max_wait:
+                result_data["warning"] = "Polling timed out after 15 minutes"
+                return json.dumps(result_data)
+            
+            time.sleep(poll_interval)
     except Exception as e:
         return json.dumps({"error": str(e)})
 
