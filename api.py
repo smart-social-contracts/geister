@@ -235,6 +235,17 @@ def build_prompt(user_principal, realm_principal, question, realm_status=None, p
     # Get persona content using PersonaManager
     actual_persona_name, persona_content = persona_manager.get_persona_or_default(persona_name)
     
+    # If PersonaManager didn't find the requested persona, try YAML personas
+    if persona_name and actual_persona_name != persona_name:
+        try:
+            from citizen_personas import get_persona as get_yaml_persona
+            yaml_persona = get_yaml_persona(persona_name)
+            if yaml_persona:
+                actual_persona_name = yaml_persona.name.lower()
+                persona_content = yaml_persona.system_prompt
+        except Exception:
+            pass
+    
     # If agent_name is provided, add identity instruction to persona
     if agent_name:
         identity = f"""You ARE {agent_name}, a real human being and citizen of this realm.
@@ -1112,6 +1123,34 @@ def list_personas():
         })
     except Exception as e:
         log(f"Error listing personas: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/personas/assistants', methods=['GET'])
+def list_assistant_personas():
+    """List all available assistant-type personas for the llm_chat extension."""
+    update_activity()
+    
+    try:
+        from citizen_personas import get_personas_by_type
+        assistants = get_personas_by_type("assistant")
+        
+        result = []
+        for key, persona in assistants.items():
+            result.append({
+                "id": key,
+                "name": persona.name,
+                "emoji": persona.emoji,
+                "description": persona.description,
+                "type": persona.persona_type,
+            })
+        
+        return jsonify({
+            "success": True,
+            "assistants": result,
+            "count": len(result)
+        })
+    except Exception as e:
+        log(f"Error listing assistant personas: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/personas/<persona_name>', methods=['GET'])
