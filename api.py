@@ -16,7 +16,7 @@ import time
 import atexit
 from database.db_client import DatabaseClient
 from persona_manager import PersonaManager
-from realm_tools import REALM_TOOLS, execute_tool, realm_status
+from realm_tools import REALM_TOOLS, execute_tool, realm_status, fetch_codex
 
 
 def log(message):
@@ -443,6 +443,27 @@ def ask():
     # Validate required fields - user_principal can be empty for anonymous users
     if not question:
         return jsonify({"error": "Missing required fields: a question is required"}), 400
+    
+    # Handle codex explanation requests: frontend sends explain_codex_id, we fetch the code and frame the prompt
+    explain_codex_id = data.get('explain_codex_id')
+    if explain_codex_id and realm_principal:
+        try:
+            codex = fetch_codex(codex_id=str(explain_codex_id), network=data.get('network', 'staging'), realm_principal=realm_principal)
+            if codex:
+                codex_name = codex.get('name', f'codex_{explain_codex_id}')
+                codex_code = codex.get('code', '# No code available')
+                question = (
+                    f"Explain the governance rules, purpose, and implications of this codex in plain language "
+                    f"that a non-programmer citizen can understand. Do NOT explain the programming syntax or "
+                    f"code structure. Focus on: what rules or policies this codex establishes, what it controls "
+                    f"or automates, how it affects governance and citizens, and any safeguards or conditions it "
+                    f"enforces.\n\nCodex name: \"{codex_name}\"\nCodex code:\n```python\n{codex_code}\n```"
+                )
+                log(f"Codex explain request for ID {explain_codex_id}: {codex_name}")
+            else:
+                log(f"Could not fetch codex {explain_codex_id} for explanation")
+        except Exception as e:
+            log(f"Error fetching codex for explanation: {e}")
     
     # Get actual persona name used (with fallback)
     actual_persona_name, _ = persona_manager.get_persona_or_default(persona_name)

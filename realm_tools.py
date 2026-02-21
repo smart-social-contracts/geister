@@ -451,6 +451,33 @@ def realm_status(network: str = "staging", realm_folder: str = ".", realm_princi
     )
 
 
+def fetch_codex(codex_id: str, network: str = "staging", realm_principal: str = "", realm_folder: str = ".") -> Optional[Dict[str, Any]]:
+    """Fetch a codex by ID from the realm canister. Returns dict with name/code or None."""
+    args_json = json.dumps({"codex_id": codex_id}).replace('"', '\\"')
+    candid_args = f'(record {{ extension_name = "codex_viewer"; function_name = "get_codex_details"; args = "{args_json}"; }})'
+    raw = _run_dfx_call(
+        canister="realm_backend",
+        method="extension_sync_call",
+        args=candid_args,
+        network=network,
+        realm_folder=realm_folder,
+        realm_principal=realm_principal,
+        timeout=30
+    )
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+        # Navigate response: may have success/response wrapper
+        resp = parsed
+        if isinstance(resp.get("response"), str):
+            resp = json.loads(resp["response"])
+        codex = resp.get("codex")
+        if codex and codex.get("name"):
+            return codex
+    except Exception:
+        pass
+    return None
+
+
 def db_get(entity_type: str, entity_id: Optional[str] = None, network: str = "staging", realm_folder: str = ".") -> str:
     """Get entities from the realm database. If entity_id is provided, get a specific entity."""
     # Normalize entity_type to title case (e.g., 'codex' -> 'Codex')
