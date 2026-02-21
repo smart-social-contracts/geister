@@ -454,7 +454,9 @@ def ask():
             raw = realm_status(network=data.get('network', 'staging'), realm_principal=realm_principal)
             parsed = json.loads(raw) if isinstance(raw, str) else raw
             if "error" not in parsed:
-                fetched_realm_status = {"realm_principal": realm_principal, "metrics": parsed}
+                # Extract metrics from nested dfx response: {data: {status: {...}}}
+                metrics = parsed.get("data", {}).get("status", parsed)
+                fetched_realm_status = {"realm_principal": realm_principal, "metrics": metrics}
                 log(f"Pre-fetched realm status for {realm_principal}")
             else:
                 log(f"Could not fetch realm status: {parsed.get('error', 'unknown')}")
