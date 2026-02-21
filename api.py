@@ -38,6 +38,7 @@ persona_manager = PersonaManager()
 
 # Model configuration with fallback
 DEFAULT_LLM_MODEL = os.getenv('DEFAULT_LLM_MODEL', 'gpt-oss:20b')
+DEFAULT_OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434')
 
 # Initialize database client
 db_client = DatabaseClient()
@@ -438,7 +439,7 @@ def ask():
     persona_name = data.get('persona')  # Optional persona name
     agent_name = data.get('agent_name')  # Optional agent display name
     agent_background = data.get('agent_background')  # Optional agent background (age, wealth, etc.)
-    ollama_url = data.get('ollama_url', 'http://localhost:11434')
+    ollama_url = data.get('ollama_url', DEFAULT_OLLAMA_URL)
     
     # Validate required fields - user_principal can be empty for anonymous users
     if not question:
@@ -864,7 +865,7 @@ def get_suggestions():
     user_principal = request.args.get('user_principal', '')
     realm_principal = request.args.get('realm_principal', '')
     persona_name = request.args.get('persona', '')
-    ollama_url = request.args.get('ollama_url', 'http://localhost:11434')
+    ollama_url = request.args.get('ollama_url', DEFAULT_OLLAMA_URL)
     
     try:
         # Get conversation history for context

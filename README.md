@@ -22,6 +22,36 @@ Telos execution log with live updates across all agents in the swarm.
 
 ![Telos Execution Log](docs/telos-log.png)
 
+## Architecture
+
+```
+┌─────────────────────────┐       ┌──────────────────────────────────┐
+│   RunPod (GPU)          │       │   DigitalOcean VM (srv1)         │
+│                         │       │                                  │
+│   Ollama LLM server     │◄──────│   Geister API (Flask :5000)      │
+│   (geister-ollama.      │ HTTPS │   PostgreSQL                     │
+│    realmsgos.dev)       │       │   (geister-api.realmsgos.dev)    │
+│                         │       │                                  │
+│   Cloudflare tunnel     │       │   Cloudflare tunnel (realms-vm)  │
+│   (realms-runpod)       │       │   systemd service                │
+└─────────────────────────┘       └──────────────────────────────────┘
+```
+
+- **Pod** — Only Ollama (needs GPU). Lightweight Docker image, auto-shuts down after inactivity.
+- **VM** — API + database. Instant deploys via `git pull && systemctl restart geister-api`.
+
+### VM Setup
+
+```bash
+sudo ./vm/setup.sh
+```
+
+### Quick Deploy (VM)
+
+```bash
+cd /srv/geister && git pull && systemctl restart geister-api
+```
+
 ## Installation
 
 ```bash

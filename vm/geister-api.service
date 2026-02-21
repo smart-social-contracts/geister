@@ -1,0 +1,19 @@
+[Unit]
+Description=Geister API (Flask)
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/srv/geister
+EnvironmentFile=/srv/geister/vm/geister-api.env
+ExecStart=/srv/geister/vm/venv/bin/python3 api.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=geister-api
+
+[Install]
+WantedBy=multi-user.target

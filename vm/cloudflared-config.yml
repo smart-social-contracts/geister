@@ -1,0 +1,7 @@
+tunnel: realms-vm
+credentials-file: /root/.cloudflared/credentials.json
+
+ingress:
+  - hostname: geister-api.realmsgos.dev
+    service: http://localhost:5000
+  - service: http_status:404

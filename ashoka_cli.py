@@ -65,7 +65,7 @@ class AshokaClient:
             sys.exit(1)
     
     def ask_question(self, question: str, user_principal: str = "", realm_principal: str = "", 
-                    persona: str = "", ollama_url: str = "http://localhost:11434", 
+                    persona: str = "", ollama_url: str = None, 
                     realm_status: Optional[Dict] = None, stream: bool = False) -> Dict[str, Any]:
         """Ask a question to Ashoka"""
         data = {
@@ -85,7 +85,7 @@ class AshokaClient:
         return self._make_request("POST", "/api/ask", data)
     
     def get_suggestions(self, user_principal: str = "", realm_principal: str = "", 
-                       persona: str = "", ollama_url: str = "http://localhost:11434") -> Dict[str, Any]:
+                       persona: str = "", ollama_url: str = None) -> Dict[str, Any]:
         """Get contextual suggestions"""
         params = {
             "user_principal": user_principal,
@@ -455,7 +455,7 @@ Examples:
     ask_parser.add_argument("--user-principal", default="", help="User principal ID")
     ask_parser.add_argument("--realm-principal", default="", help="Realm principal ID")
     ask_parser.add_argument("--persona", default="", help="Persona to use (default: ashoka)")
-    ask_parser.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama API URL")
+    ask_parser.add_argument("--ollama-url", default=os.getenv('OLLAMA_URL', 'http://localhost:11434'), help="Ollama API URL")
     ask_parser.add_argument("--realm-status-file", help="JSON file containing realm status data")
     ask_parser.add_argument("--stream", action="store_true", help="Enable streaming response")
     
@@ -464,7 +464,7 @@ Examples:
     suggestions_parser.add_argument("--user-principal", default="", help="User principal ID")
     suggestions_parser.add_argument("--realm-principal", default="", help="Realm principal ID")
     suggestions_parser.add_argument("--persona", default="", help="Persona to use")
-    suggestions_parser.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama API URL")
+    suggestions_parser.add_argument("--ollama-url", default=os.getenv('OLLAMA_URL', 'http://localhost:11434'), help="Ollama API URL")
     
     # Personas command
     personas_parser = subparsers.add_parser("personas", help="Manage personas")
