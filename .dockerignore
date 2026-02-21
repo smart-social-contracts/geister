@@ -1,1 +1,11 @@
 __pycache__/
+*.pyc
+.git/
+vm/venv/
+vm/.dev.pid
+vm/dev.log
+vm/postgres_data/
+logs/
+*.log
+.env
+secrets.enc.yaml

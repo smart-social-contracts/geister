@@ -1,0 +1,41 @@
+services:
+  geister-api:
+    build:
+      context: ..
+      dockerfile: vm/Dockerfile
+    container_name: geister-api
+    ports:
+      - "5000:5000"
+    env_file:
+      - geister-api.env
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: geister-postgres
+    environment:
+      POSTGRES_DB: geister_db
+      POSTGRES_USER: geister_user
+      POSTGRES_PASSWORD: geister_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geister_user -d geister_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

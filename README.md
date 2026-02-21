@@ -38,18 +38,27 @@ Telos execution log with live updates across all agents in the swarm.
 ```
 
 - **Pod** — Only Ollama (needs GPU). Lightweight Docker image, auto-shuts down after inactivity.
-- **VM** — API + database. Instant deploys via `git pull && systemctl restart geister-api`.
+- **VM** — API + database (Docker containers). Cloudflare tunnel exposes the API.
 
-### VM Setup
+### VM Setup (Production — Docker)
 
 ```bash
-sudo ./vm/setup.sh
+sudo ./vm/setup.sh docker   # builds & starts containers
+```
+
+### VM Setup (Development — direct on host)
+
+```bash
+sudo ./vm/setup.sh dev      # installs PostgreSQL, venv, dfx
+./vm/dev.sh start            # run API in background
+./vm/dev.sh fg               # or run in foreground
+./vm/dev.sh logs             # tail logs
 ```
 
 ### Quick Deploy (VM)
 
 ```bash
-cd /srv/geister && git pull && systemctl restart geister-api
+cd /srv/geister && git pull && docker compose -f vm/docker-compose.yml up -d --build
 ```
 
 ## Installation
