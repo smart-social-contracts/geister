@@ -16,7 +16,7 @@ import time
 import atexit
 from database.db_client import DatabaseClient
 from persona_manager import PersonaManager
-from realm_tools import REALM_TOOLS, execute_tool
+from realm_tools import REALM_TOOLS, execute_tool, realm_status
 
 
 def log(message):
@@ -447,8 +447,22 @@ def ask():
     # Get actual persona name used (with fallback)
     actual_persona_name, _ = persona_manager.get_persona_or_default(persona_name)
     
-    # Build complete prompt with persona and realm context (realm_status fetched by LLM tool if needed)
-    prompt = build_prompt(user_principal, realm_principal, question, None, persona_name, agent_name, agent_background, agent_id)
+    # Fetch realm status upfront so the assistant always knows which realm it's in
+    fetched_realm_status = None
+    if realm_principal:
+        try:
+            raw = realm_status(network=data.get('network', 'staging'), realm_principal=realm_principal)
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+            if "error" not in parsed:
+                fetched_realm_status = {"realm_principal": realm_principal, "metrics": parsed}
+                log(f"Pre-fetched realm status for {realm_principal}")
+            else:
+                log(f"Could not fetch realm status: {parsed.get('error', 'unknown')}")
+        except Exception as e:
+            log(f"Error pre-fetching realm status: {e}")
+    
+    # Build complete prompt with persona and realm context
+    prompt = build_prompt(user_principal, realm_principal, question, fetched_realm_status, persona_name, agent_name, agent_background, agent_id)
     
     # Log the complete prompt for debugging
     log("\n" + "="*80)
