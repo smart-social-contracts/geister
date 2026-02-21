@@ -192,6 +192,16 @@ class AgentMemory:
                         json.dumps(metadata)
                     ))
                     profile = cursor.fetchone()
+                    
+                    # Auto-assign default telos to new agents
+                    cursor.execute("SELECT id FROM telos_templates WHERE is_default = TRUE LIMIT 1")
+                    default_tpl = cursor.fetchone()
+                    if default_tpl:
+                        cursor.execute("""
+                            INSERT INTO agent_telos (agent_id, telos_template_id, state, current_step, step_results)
+                            VALUES (%s, %s, 'active', 0, '{}')
+                            ON CONFLICT (agent_id) DO NOTHING
+                        """, (self.agent_id, default_tpl['id']))
                 
                 self.connection.commit()
                 return dict(profile) if profile else {}

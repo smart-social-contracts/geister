@@ -511,8 +511,18 @@ def ask():
         start_time = time_module.time()
         
         if stream:
-            return Response(stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, actual_persona_name, network, realm_folder, agent_id, verbosity), 
-                          mimetype='text/plain')
+            def sse_wrapper():
+                for chunk in stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, actual_persona_name, network, realm_folder, agent_id, verbosity):
+                    if chunk:
+                        yield f"data: {json.dumps({'text': chunk})}\n\n"
+                yield "data: [DONE]\n\n"
+            return Response(sse_wrapper(), 
+                          mimetype='text/event-stream',
+                          headers={
+                              'Cache-Control': 'no-cache',
+                              'X-Accel-Buffering': 'no',
+                              'Connection': 'keep-alive'
+                          })
         else:
             # Build messages for chat API
             messages = [
@@ -530,14 +540,25 @@ def ask():
                 iteration += 1
                 log(f"Ollama iteration {iteration}...")
                 
-                response = requests.post(f"{ollama_url}/api/chat", json={
-                    "model": DEFAULT_LLM_MODEL,
-                    "messages": messages,
-                    "tools": REALM_TOOLS,
-                    "stream": False
-                })
+                try:
+                    response = requests.post(f"{ollama_url}/api/chat", json={
+                        "model": DEFAULT_LLM_MODEL,
+                        "messages": messages,
+                        "tools": REALM_TOOLS,
+                        "stream": False
+                    }, timeout=(10, 120))
+                except requests.exceptions.ConnectionError:
+                    return jsonify({"error": f"Cannot reach Ollama at {ollama_url}. The LLM backend appears to be offline."}), 502
+                except requests.exceptions.Timeout:
+                    return jsonify({"error": f"Ollama at {ollama_url} timed out. The LLM backend may be overloaded."}), 504
                 
-                result = response.json()
+                if response.status_code != 200:
+                    return jsonify({"error": f"Cannot reach Ollama at {ollama_url} (HTTP {response.status_code}). The LLM backend appears to be offline or unavailable."}), 502
+                
+                try:
+                    result = response.json()
+                except ValueError:
+                    return jsonify({"error": f"Invalid response from Ollama at {ollama_url}. The LLM backend may be misconfigured."}), 502
                 assistant_message = result.get('message', {})
                 messages.append(assistant_message)
                 
@@ -617,6 +638,12 @@ def ask():
                 "model": DEFAULT_LLM_MODEL,
                 "duration_ms": duration_ms
             })
+    except requests.exceptions.ConnectionError:
+        log(f"Cannot connect to Ollama at {ollama_url}")
+        return jsonify({"error": f"Cannot reach Ollama at {ollama_url}. The LLM backend appears to be offline."}), 502
+    except requests.exceptions.Timeout:
+        log(f"Ollama timeout at {ollama_url}")
+        return jsonify({"error": f"Ollama at {ollama_url} timed out. The LLM backend may be overloaded."}), 504
     except Exception as e:
         log(f"Error: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
@@ -635,8 +662,9 @@ def ask_with_tools():
 def stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, persona_name, network="staging", realm_folder=".", agent_id=None, verbosity=0):
     """Generator function for streaming responses with tool calling support.
     
-    First checks if tools are needed (non-streaming), executes them if so,
-    then streams the final response.
+    Streams from the very first Ollama call. If the model decides to use tools,
+    switches to tool execution mode then streams the final answer. If no tools
+    are needed, content is piped directly to the client token-by-token.
     
     Verbosity levels:
     - 0: Q&A only (no debug output)
@@ -661,38 +689,132 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
             return f"\n__DEBUG_START__ [{ts}] {label}\n{content}\n__DEBUG_END__\n"
         return ""
     
+    def _stream_ollama(chat_messages, with_tools=False):
+        """Helper: stream an Ollama chat call, yielding (chunk, full_answer) at the end.
+        Yields content chunks as they arrive. Returns full accumulated answer."""
+        payload = {
+            "model": DEFAULT_LLM_MODEL,
+            "messages": chat_messages,
+            "stream": True
+        }
+        if with_tools:
+            payload["tools"] = REALM_TOOLS
+        
+        try:
+            resp = requests.post(f"{ollama_url}/api/chat", json=payload, stream=True, timeout=(10, 120))
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            yield f"Error: Cannot reach Ollama at {ollama_url}. The LLM backend appears to be offline."
+            return
+        if resp.status_code != 200:
+            yield f"Error: Cannot reach Ollama at {ollama_url} (HTTP {resp.status_code}). The LLM backend appears to be offline or unavailable."
+            return
+        full_answer = ""
+        for line in resp.iter_lines():
+            if not line:
+                continue
+            try:
+                data = json.loads(line.decode('utf-8'))
+            except ValueError:
+                yield f"Error: Invalid response from Ollama. The LLM backend may be misconfigured."
+                return
+            if 'error' in data:
+                log(f"Ollama error: {data['error']}")
+                yield f"Error: {data['error']}"
+                return
+            if 'message' in data and 'content' in data['message']:
+                chunk = data['message']['content']
+                full_answer += chunk
+                yield chunk
+            if data.get('done', False):
+                break
+        return full_answer
+    
+    def _stream_final(chat_messages):
+        """Stream a final response (no tools) and yield content chunks. Returns full answer."""
+        try:
+            stream_resp = requests.post(f"{ollama_url}/api/chat", json={
+                "model": DEFAULT_LLM_MODEL,
+                "messages": chat_messages,
+                "stream": True
+            }, stream=True, timeout=(10, 120))
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            yield f"Error: Cannot reach Ollama at {ollama_url}. The LLM backend appears to be offline."
+            return
+        if stream_resp.status_code != 200:
+            yield f"Error: Cannot reach Ollama at {ollama_url} (HTTP {stream_resp.status_code}). The LLM backend appears to be offline or unavailable."
+            return
+        full = ""
+        for line in stream_resp.iter_lines():
+            if not line:
+                continue
+            try:
+                data = json.loads(line.decode('utf-8'))
+            except ValueError:
+                yield f"Error: Invalid response from Ollama. The LLM backend may be misconfigured."
+                return
+            if 'error' in data:
+                log(f"Ollama error: {data['error']}")
+                yield f"Error: {data['error']}"
+                return
+            chunk = data.get('message', {}).get('content', '')
+            if chunk:
+                full += chunk
+                yield chunk
+            if data.get('done', False):
+                break
+        save_to_conversation(user_principal, realm_principal, question, full, prompt, persona_name, agent_id)
+    
     try:
-        # Build messages for chat API
         messages = [
             {"role": "system", "content": prompt},
             {"role": "user", "content": question}
         ]
         
-        # First call - check if tools are needed (non-streaming)
-        log("Checking for tool calls...")
+        # Quick non-streaming call WITH tools to check if tools are needed
+        log("Checking for tool calls (non-streaming)...")
         dbg = debug("Checking for tool calls...")
         if dbg:
             yield dbg
-            
-        response = requests.post(f"{ollama_url}/api/chat", json={
-            "model": DEFAULT_LLM_MODEL,
-            "messages": messages,
-            "tools": REALM_TOOLS,
-            "stream": False
-        })
         
-        result = response.json()
+        try:
+            check_response = requests.post(f"{ollama_url}/api/chat", json={
+                "model": DEFAULT_LLM_MODEL,
+                "messages": messages,
+                "tools": REALM_TOOLS,
+                "stream": False
+            }, timeout=(10, 120))
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            yield f"Error: Cannot reach Ollama at {ollama_url}. The LLM backend appears to be offline."
+            return
+        if check_response.status_code != 200:
+            yield f"Error: Cannot reach Ollama at {ollama_url} (HTTP {check_response.status_code}). The LLM backend appears to be offline or unavailable."
+            return
+        
+        try:
+            result = check_response.json()
+        except ValueError:
+            yield f"Error: Invalid response from Ollama. The LLM backend may be misconfigured."
+            return
         assistant_message = result.get('message', {})
         messages.append(assistant_message)
         
-        # Multi-step tool execution loop (same as non-streaming)
+        # If no tool calls needed, stream a fresh response WITHOUT tools (avoids thinking overhead)
+        if not assistant_message.get('tool_calls'):
+            log("No tools needed, streaming response without tools...")
+            dbg = debug("No tools needed, streaming response...")
+            if dbg:
+                yield dbg
+            yield from _stream_final(messages[:2])  # Only system + user messages
+            return
+        
+        # Tool execution loop
         max_iterations = 10
         iteration = 0
         
         while assistant_message.get('tool_calls') and iteration < max_iterations:
             iteration += 1
-            log(f"Tool calls requested in streaming mode! (iteration {iteration})")
-            dbg = debug(f"Tool calls requested in streaming mode! (iteration {iteration})")
+            log(f"Tool execution iteration {iteration}")
+            dbg = debug(f"Tool execution iteration {iteration}")
             if dbg:
                 yield dbg
             
@@ -705,11 +827,9 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
                 if dbg:
                     yield dbg
                 
-                # Execute the tool
                 tool_result = execute_tool(tool_name, tool_args, network=network, realm_folder=realm_folder, realm_principal=realm_principal, user_principal=user_principal)
                 
                 log(f"Tool result: {tool_result[:500]}..." if len(tool_result) > 500 else f"Tool result: {tool_result}")
-                # Pretty print JSON in debug block
                 try:
                     pretty_result = json.dumps(json.loads(tool_result), indent=2)
                 except:
@@ -718,138 +838,53 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
                 if dbg:
                     yield dbg
                 
-                # Add tool result to messages
-                messages.append({
-                    "role": "tool",
-                    "content": tool_result
-                })
+                messages.append({"role": "tool", "content": tool_result})
             
-            # Check if more tool calls are needed (non-streaming check)
+            # Check if more tool calls are needed (non-streaming)
             log(f"Checking for additional tool calls (iteration {iteration})...")
             dbg = debug(f"Checking for additional tool calls (iteration {iteration})...")
             if dbg:
                 yield dbg
-                
-            check_response = requests.post(f"{ollama_url}/api/chat", json={
-                "model": DEFAULT_LLM_MODEL,
-                "messages": messages,
-                "tools": REALM_TOOLS,
-                "stream": False
-            })
             
-            result = check_response.json()
+            try:
+                check_response = requests.post(f"{ollama_url}/api/chat", json={
+                    "model": DEFAULT_LLM_MODEL,
+                    "messages": messages,
+                    "tools": REALM_TOOLS,
+                    "stream": False
+                }, timeout=(10, 120))
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+                yield f"Error: Cannot reach Ollama at {ollama_url}. The LLM backend appears to be offline."
+                return
+            if check_response.status_code != 200:
+                yield f"Error: Cannot reach Ollama at {ollama_url} (HTTP {check_response.status_code}). The LLM backend appears to be offline or unavailable."
+                return
+            
+            try:
+                result = check_response.json()
+            except ValueError:
+                yield f"Error: Invalid response from Ollama. The LLM backend may be misconfigured."
+                return
             assistant_message = result.get('message', {})
             messages.append(assistant_message)
             
-            # If no more tool calls and we have content, we're done with tools
             if not assistant_message.get('tool_calls'):
                 break
         
-        # Now stream the final response
-        if iteration > 0:
-            # We executed tools, check if we already have content from last check
-            final_content = assistant_message.get('content', '')
-            if final_content:
-                log(f"Final answer from tool loop: {final_content[:100]}...")
-                dbg = debug(f"Final answer from tool loop (iteration {iteration})")
-                if dbg:
-                    yield dbg
-                yield final_content
-                save_to_conversation(user_principal, realm_principal, question, final_content, prompt, persona_name, agent_id)
-            else:
-                # Stream a new response with all tool results
-                log("Streaming final response with tool results...")
-                log(f"Messages being sent: {len(messages)} messages")
-                dbg = debug(f"Streaming final response with tool results... ({len(messages)} messages)")
-                if dbg:
-                    yield dbg
-                    
-                final_response = requests.post(f"{ollama_url}/api/chat", json={
-                    "model": DEFAULT_LLM_MODEL,
-                    "messages": messages[:-1] if not assistant_message.get('content') else messages,  # Remove empty assistant message
-                    "stream": True
-                }, stream=True)
-                
-                log(f"Final response status: {final_response.status_code}")
-                dbg = debug(f"Final response status: {final_response.status_code}")
-                if dbg:
-                    yield dbg
-                    
-                full_answer = ""
-                line_count = 0
-                for line in final_response.iter_lines():
-                    line_count += 1
-                    if line:
-                        log(f"Stream line {line_count}: {line[:200]}")
-                        dbg = debug(f"Stream line {line_count}: {line[:200].decode('utf-8') if isinstance(line, bytes) else line[:200]}", is_stream_line=True)
-                        if dbg:
-                            yield dbg
-                            
-                        data = json.loads(line.decode('utf-8'))
-                        if 'error' in data:
-                            log(f"Ollama error: {data['error']}")
-                            yield f"Error: {data['error']}"
-                            break
-                        if 'message' in data and 'content' in data['message']:
-                            chunk = data['message']['content']
-                            full_answer += chunk
-                            yield chunk
-                        
-                        if data.get('done', False):
-                            log(f"Stream done. Full answer length: {len(full_answer)}")
-                            dbg = debug(f"Stream done. Full answer length: {len(full_answer)}")
-                            if dbg:
-                                yield dbg
-                            save_to_conversation(user_principal, realm_principal, question, full_answer, prompt, persona_name, agent_id)
-                            break
-                log(f"Stream ended after {line_count} lines, answer: {full_answer[:100] if full_answer else '(empty)'}")
-                dbg = debug(f"Stream ended after {line_count} lines")
-                if dbg:
-                    yield dbg
+        # Stream the final response after tool execution (without tools to avoid thinking overhead)
+        final_content = assistant_message.get('content', '')
+        if final_content:
+            log(f"Final answer from tool loop: {final_content[:100]}...")
+            yield final_content
+            save_to_conversation(user_principal, realm_principal, question, final_content, prompt, persona_name, agent_id)
         else:
-            # No tool calls - stream directly using chat API
-            log("No tools needed, streaming response...")
-            log(f"Assistant message content: '{assistant_message.get('content', '')[:200] if assistant_message.get('content') else '(empty)'}'")
-            dbg = debug("No tools needed, streaming response...")
+            log("Streaming final response after tools...")
+            dbg = debug(f"Streaming final response after tools ({len(messages)} messages)")
             if dbg:
                 yield dbg
-                
-            full_answer = assistant_message.get('content', '')
-            
-            # If we already have content from the first call, yield it
-            if full_answer:
-                yield full_answer
-                save_to_conversation(user_principal, realm_principal, question, full_answer, prompt, persona_name, agent_id)
-            else:
-                # Stream a new response
-                log(f"Streaming new response, messages count: {len(messages[:-1])}")
-                stream_response = requests.post(f"{ollama_url}/api/chat", json={
-                    "model": DEFAULT_LLM_MODEL,
-                    "messages": messages[:-1],  # Remove empty assistant message
-                    "stream": True
-                }, stream=True)
-                log(f"Stream response status: {stream_response.status_code}")
-                
-                line_count = 0
-                for line in stream_response.iter_lines():
-                    line_count += 1
-                    if line:
-                        dbg = debug(f"Stream line {line_count}: {line[:200].decode('utf-8') if isinstance(line, bytes) else line[:200]}", is_stream_line=True)
-                        if dbg:
-                            yield dbg
-                            
-                        data = json.loads(line.decode('utf-8'))
-                        if 'message' in data and 'content' in data['message']:
-                            chunk = data['message']['content']
-                            full_answer += chunk
-                            yield chunk
-                        
-                        if data.get('done', False):
-                            dbg = debug(f"Stream done. Full answer length: {len(full_answer)}")
-                            if dbg:
-                                yield dbg
-                            save_to_conversation(user_principal, realm_principal, question, full_answer, prompt, persona_name, agent_id)
-                            break
+            # Remove empty assistant message, stream without tools
+            final_messages = messages[:-1] if not assistant_message.get('content') else messages
+            yield from _stream_final(final_messages)
                             
     except Exception as e:
         log(f"Error in stream_response_with_tools: {traceback.format_exc()}")

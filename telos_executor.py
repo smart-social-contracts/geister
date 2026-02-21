@@ -116,17 +116,25 @@ IMPORTANT RULES:
         while iteration < max_iterations:
             iteration += 1
             
-            response = requests.post(f"{OLLAMA_URL}/api/chat", json={
-                "model": DEFAULT_MODEL,
-                "messages": messages,
-                "tools": REALM_TOOLS,
-                "stream": False
-            }, timeout=120)
+            try:
+                response = requests.post(f"{OLLAMA_URL}/api/chat", json={
+                    "model": DEFAULT_MODEL,
+                    "messages": messages,
+                    "tools": REALM_TOOLS,
+                    "stream": False
+                }, timeout=(10, 120))
+            except requests.exceptions.ConnectionError:
+                return {"success": False, "error": f"Cannot reach Ollama at {OLLAMA_URL}. The LLM backend appears to be offline."}
+            except requests.exceptions.Timeout:
+                return {"success": False, "error": f"Ollama at {OLLAMA_URL} timed out. The LLM backend may be overloaded."}
             
             if response.status_code != 200:
-                return {"success": False, "error": f"Ollama error: {response.status_code}"}
+                return {"success": False, "error": f"Cannot reach Ollama at {OLLAMA_URL} (HTTP {response.status_code}). The LLM backend appears to be offline or unavailable."}
             
-            result = response.json()
+            try:
+                result = response.json()
+            except ValueError:
+                return {"success": False, "error": f"Invalid response from Ollama at {OLLAMA_URL}. The LLM backend may be misconfigured."}
             assistant_message = result.get('message', {})
             messages.append(assistant_message)
             
