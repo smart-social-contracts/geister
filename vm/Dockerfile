@@ -7,7 +7,8 @@ RUN apt-get update && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install dfx (needed by realm_tools.py for canister calls)
-RUN DFXVM_INIT_YES=1 sh -ci "$(curl -fsSL https://internetcomputer.org/install.sh)"
+RUN DFXVM_INIT_YES=1 sh -ci "$(curl -fsSL https://internetcomputer.org/install.sh)" && \
+    /root/.local/share/dfx/bin/dfxvm install 0.29.0
 ENV PATH="/root/.local/share/dfx/bin:${PATH}"
 
 WORKDIR /app
