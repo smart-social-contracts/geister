@@ -157,15 +157,26 @@ class AgentMemory:
                 profile = cursor.fetchone()
                 
                 if profile:
-                    # Update last_active and session count
-                    cursor.execute("""
-                        UPDATE agent_profiles 
-                        SET last_active_at = NOW(), 
-                            total_sessions = total_sessions + 1,
-                            persona = COALESCE(%s, persona)
-                        WHERE agent_id = %s
-                        RETURNING *
-                    """, (self.persona, self.agent_id))
+                    # Update last_active, session count, and optionally metadata
+                    if metadata:
+                        cursor.execute("""
+                            UPDATE agent_profiles 
+                            SET last_active_at = NOW(), 
+                                total_sessions = total_sessions + 1,
+                                persona = COALESCE(%s, persona),
+                                metadata = %s
+                            WHERE agent_id = %s
+                            RETURNING *
+                        """, (self.persona, json.dumps(metadata), self.agent_id))
+                    else:
+                        cursor.execute("""
+                            UPDATE agent_profiles 
+                            SET last_active_at = NOW(), 
+                                total_sessions = total_sessions + 1,
+                                persona = COALESCE(%s, persona)
+                            WHERE agent_id = %s
+                            RETURNING *
+                        """, (self.persona, self.agent_id))
                     profile = cursor.fetchone()
                 else:
                     # Create new profile with auto-generated background
@@ -193,15 +204,17 @@ class AgentMemory:
                     ))
                     profile = cursor.fetchone()
                     
-                    # Auto-assign default telos to new agents
-                    cursor.execute("SELECT id FROM telos_templates WHERE is_default = TRUE LIMIT 1")
-                    default_tpl = cursor.fetchone()
-                    if default_tpl:
-                        cursor.execute("""
-                            INSERT INTO agent_telos (agent_id, telos_template_id, state, current_step, step_results)
-                            VALUES (%s, %s, 'active', 0, '{}')
-                            ON CONFLICT (agent_id) DO NOTHING
-                        """, (self.agent_id, default_tpl['id']))
+                    # Auto-assign default telos to new agents (only if they don't already have one)
+                    cursor.execute("SELECT id FROM agent_telos WHERE agent_id = %s LIMIT 1", (self.agent_id,))
+                    existing_telos = cursor.fetchone()
+                    if not existing_telos:
+                        cursor.execute("SELECT id FROM telos_templates WHERE is_default = TRUE LIMIT 1")
+                        default_tpl = cursor.fetchone()
+                        if default_tpl:
+                            cursor.execute("""
+                                INSERT INTO agent_telos (agent_id, telos_template_id, state, current_step, step_results)
+                                VALUES (%s, %s, 'active', 0, '{}')
+                            """, (self.agent_id, default_tpl['id']))
                 
                 self.connection.commit()
                 return dict(profile) if profile else {}

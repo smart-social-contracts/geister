@@ -1042,6 +1042,51 @@ def list_agents():
         return jsonify({"error": str(e), "agents": []}), 500
 
 
+@app.route('/api/agents', methods=['POST'])
+def create_agent():
+    """Create a new agent profile (or update if it already exists).
+
+    Accepts JSON body:
+        agent_id (required): Unique agent identifier
+        display_name: Human-readable name
+        persona: Persona type
+        metadata: Dict of extra data (run tags, CI info, etc.)
+    """
+    update_activity()
+
+    data = request.json or {}
+    agent_id = data.get('agent_id')
+    if not agent_id:
+        return jsonify({"error": "agent_id is required"}), 400
+
+    display_name = data.get('display_name')
+    persona = data.get('persona')
+    metadata = data.get('metadata')
+
+    try:
+        from agent_memory import AgentMemory
+        memory = AgentMemory(agent_id, persona=persona)
+        profile = memory.ensure_profile(display_name=display_name, metadata=metadata)
+        memory.close()
+
+        return jsonify({
+            "success": True,
+            "agent": {
+                "agent_id": profile.get('agent_id'),
+                "principal": profile.get('principal'),
+                "display_name": profile.get('display_name'),
+                "persona": profile.get('persona'),
+                "total_sessions": profile.get('total_sessions'),
+                "created_at": str(profile.get('created_at')) if profile.get('created_at') else None,
+                "last_active_at": str(profile.get('last_active_at')) if profile.get('last_active_at') else None,
+                "metadata": profile.get('metadata'),
+            }
+        }), 201
+    except Exception as e:
+        log(f"Error creating agent {agent_id}: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/agents/<agent_id>', methods=['GET'])
 def get_agent(agent_id):
     """Get detailed agent profile including memories"""
