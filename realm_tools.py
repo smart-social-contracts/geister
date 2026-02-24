@@ -299,19 +299,35 @@ def registry_redeem_voucher(
 def registry_deploy_realm(
     principal_id: str,
     realm_name: str,
+    description: str = "",
+    logo_url: str = "",
+    welcome_image_url: str = "",
+    welcome_message: str = "",
     management_url: str = "https://management.realmsgos.dev",
     network: str = "staging",
     realm_folder: str = ".",
 ) -> str:
     """Deploy a new realm via the management service. Returns a deployment_id for status polling."""
     try:
+        realm_config = {
+            "name": realm_name,
+            "descriptions": {"en": description or f"Realm created by agent: {realm_name}"},
+            "languages": ["en"],
+            "welcome_messages": {"en": welcome_message or f"Welcome to {realm_name}!"},
+            "token_enabled": True,
+            "token_name": realm_name,
+            "token_symbol": realm_name[:4].upper(),
+            "extensions": [],
+        }
+        if logo_url:
+            realm_config["logo_url"] = logo_url
+        if welcome_image_url:
+            realm_config["welcome_image_url"] = welcome_image_url
         resp = requests.post(
             f"{management_url}/api/deploy",
             json={
                 "principal_id": principal_id,
-                "realm_config": {
-                    "name": realm_name,
-                }
+                "realm_config": realm_config,
             },
             timeout=120
         )
@@ -815,6 +831,22 @@ REALM_TOOLS = [
                     "realm_name": {
                         "type": "string",
                         "description": "Name for the new realm"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "A compelling description of the realm's purpose and vision"
+                    },
+                    "logo_url": {
+                        "type": "string",
+                        "description": "URL to the realm's emblem/logo image (PNG)"
+                    },
+                    "welcome_image_url": {
+                        "type": "string",
+                        "description": "URL to the realm's background/welcome image (PNG)"
+                    },
+                    "welcome_message": {
+                        "type": "string",
+                        "description": "Welcome message shown to new citizens joining the realm"
                     }
                 },
                 "required": ["principal_id", "realm_name"]
