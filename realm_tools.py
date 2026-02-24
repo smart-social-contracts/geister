@@ -333,11 +333,17 @@ def registry_deploy_realm(
         )
         if resp.status_code == 200:
             data = resp.json()
-            return json.dumps({
-                "success": True,
+            api_success = data.get("success", True)
+            result = {
+                "success": api_success,
                 "deployment_id": data.get("deployment_id"),
-                "message": "Deployment started. Use registry_deploy_status to poll for completion.",
-            })
+            }
+            if api_success:
+                result["message"] = "Deployment started. Use registry_deploy_status to poll for completion."
+            else:
+                result["error"] = data.get("error") or data.get("message") or "Deploy failed"
+                result["message"] = data.get("message", "Deploy request failed")
+            return json.dumps(result)
         else:
             return json.dumps({"error": f"HTTP {resp.status_code}: {resp.text[:200]}"})
     except Exception as e:
