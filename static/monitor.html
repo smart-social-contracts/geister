@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Swarm Monitor - Geister</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': {
+                            50: '#FAFAFA',
+                            100: '#F5F5F5',
+                            200: '#E5E5E5',
+                            300: '#D4D4D4',
+                            400: '#A3A3A3',
+                            500: '#737373',
+                            600: '#525252',
+                            700: '#404040',
+                            800: '#262626',
+                            900: '#171717'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Helvetica Neue', 'Helvetica', 'Arial', 'ui-sans-serif', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .event-enter { animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .border-success { border-left-color: #22c55e; }
+        .border-error { border-left-color: #ef4444; }
+        .border-info { border-left-color: #3b82f6; }
+        .border-warning { border-left-color: #f59e0b; }
+        .pulse-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .detail-toggle { cursor: pointer; }
+        .detail-content { display: none; }
+        .detail-content.open { display: block; }
+        pre.event-detail {
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .filter-bar select, .filter-bar input {
+            font-size: 0.8125rem;
+        }
+    </style>
+</head>
+<body class="bg-white text-primary-900 min-h-screen font-sans">
+    <!-- Header -->
+    <header class="bg-primary-900 border-b border-primary-800 sticky top-0 z-20">
+        <div class="max-w-7xl mx-auto px-4 py-4 sm:px-6">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div class="flex items-center gap-3">
+                    <a href="/dashboard" class="text-primary-400 hover:text-white transition-colors">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                    </a>
+                    <div>
+                        <h1 class="text-xl sm:text-2xl font-bold text-white flex items-center gap-2">
+                            Swarm Monitor
+                            <span id="live-indicator" class="flex items-center gap-1.5 text-xs font-normal text-green-400">
+                                <span class="pulse-dot bg-green-400"></span>
+                                LIVE
+                            </span>
+                        </h1>
+                        <p class="text-sm text-primary-400">Real-time event feed across all agents</p>
+                    </div>
+                </div>
+                <div class="flex gap-2 items-center">
+                    <span class="text-primary-400 text-sm" id="event-count">0 events</span>
+                    <button onclick="toggleLive()" id="live-toggle" class="bg-primary-700 hover:bg-primary-600 text-white px-4 py-2 rounded font-medium transition-colors text-sm">
+                        ⏸ Pause
+                    </button>
+                    <button onclick="clearEvents()" class="bg-primary-700 hover:bg-primary-600 text-white px-4 py-2 rounded font-medium transition-colors text-sm">
+                        Clear
+                    </button>
+                    <a href="/dashboard" class="bg-primary-600 hover:bg-primary-500 text-white px-4 py-2 rounded font-medium transition-colors text-sm">
+                        Dashboard
+                    </a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Filter Bar -->
+    <div class="bg-primary-50 border-b border-primary-200 sticky top-[72px] z-10 filter-bar">
+        <div class="max-w-7xl mx-auto px-4 py-3 sm:px-6">
+            <div class="flex flex-wrap gap-3 items-center">
+                <div class="flex items-center gap-1.5">
+                    <label class="text-xs font-medium text-primary-500 uppercase tracking-wide">Agent</label>
+                    <select id="filter-agent" onchange="applyFilters()" class="bg-white border border-primary-200 rounded px-2 py-1.5 text-primary-700 min-w-[140px]">
+                        <option value="">All Agents</option>
+                    </select>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <label class="text-xs font-medium text-primary-500 uppercase tracking-wide">Persona</label>
+                    <select id="filter-persona" onchange="applyFilters()" class="bg-white border border-primary-200 rounded px-2 py-1.5 text-primary-700 min-w-[120px]">
+                        <option value="">All Personas</option>
+                    </select>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <label class="text-xs font-medium text-primary-500 uppercase tracking-wide">Type</label>
+                    <select id="filter-type" onchange="applyFilters()" class="bg-white border border-primary-200 rounded px-2 py-1.5 text-primary-700 min-w-[120px]">
+                        <option value="">All Types</option>
+                    </select>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <label class="text-xs font-medium text-primary-500 uppercase tracking-wide">Telos</label>
+                    <select id="filter-telos" onchange="applyFilters()" class="bg-white border border-primary-200 rounded px-2 py-1.5 text-primary-700 min-w-[140px]">
+                        <option value="">All Telos</option>
+                    </select>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <label class="text-xs font-medium text-primary-500 uppercase tracking-wide">Status</label>
+                    <select id="filter-status" onchange="applyFilters()" class="bg-white border border-primary-200 rounded px-2 py-1.5 text-primary-700 min-w-[100px]">
+                        <option value="">All</option>
+                        <option value="success">Success</option>
+                        <option value="error">Errors</option>
+                    </select>
+                </div>
+                <div class="flex items-center gap-1.5 flex-1 min-w-[180px]">
+                    <label class="text-xs font-medium text-primary-500 uppercase tracking-wide">Search</label>
+                    <input type="text" id="filter-search" onkeyup="debounceSearch()" placeholder="Search events..." class="bg-white border border-primary-200 rounded px-2 py-1.5 text-primary-700 w-full">
+                </div>
+                <button onclick="resetFilters()" class="text-xs text-primary-500 hover:text-primary-700 underline">Reset</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Bar -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 pt-4">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            <div class="bg-primary-50 rounded-lg p-3 border border-primary-200">
+                <p class="text-xs text-primary-500 uppercase tracking-wide">Total Events</p>
+                <p class="text-xl font-bold text-primary-900" id="stat-total">0</p>
+            </div>
+            <div class="bg-green-50 rounded-lg p-3 border border-green-200">
+                <p class="text-xs text-green-600 uppercase tracking-wide">Success</p>
+                <p class="text-xl font-bold text-green-700" id="stat-success">0</p>
+            </div>
+            <div class="bg-red-50 rounded-lg p-3 border border-red-200">
+                <p class="text-xs text-red-600 uppercase tracking-wide">Errors</p>
+                <p class="text-xl font-bold text-red-700" id="stat-errors">0</p>
+            </div>
+            <div class="bg-blue-50 rounded-lg p-3 border border-blue-200">
+                <p class="text-xs text-blue-600 uppercase tracking-wide">Active Agents</p>
+                <p class="text-xl font-bold text-blue-700" id="stat-agents">0</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Event Stream -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 pb-8">
+        <div id="event-stream" class="space-y-2">
+            <div id="loading-msg" class="text-center py-12 text-primary-400">
+                <div class="inline-flex items-center gap-2">
+                    <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                    Loading events...
+                </div>
+            </div>
+        </div>
+        <div id="empty-msg" class="hidden text-center py-12 text-primary-400">
+            <p class="text-lg mb-2">No events yet</p>
+            <p class="text-sm">Events will appear here as agents take actions</p>
+        </div>
+    </main>
+
+    <script>
+        const API_BASE = '';
+        let allEvents = [];
+        let isLive = true;
+        let pollInterval = null;
+        let lastSeenTimestamp = null;
+        let searchDebounce = null;
+        let userScrolled = false;
+
+        const personaEmoji = {
+            'compliant': '🐑',
+            'ashoka': '🏛️',
+            'founder': '👑',
+            'watchful': '👁️',
+            'exploiter': '🦊',
+            'explorer': '🧭'
+        };
+
+        const typeColors = {
+            'telos_step': 'bg-purple-100 text-purple-700',
+            'session': 'bg-blue-100 text-blue-700',
+            'join': 'bg-green-100 text-green-700',
+            'vote': 'bg-amber-100 text-amber-700',
+            'observe': 'bg-cyan-100 text-cyan-700',
+            'analyze': 'bg-indigo-100 text-indigo-700',
+            'transfer': 'bg-orange-100 text-orange-700',
+            'test': 'bg-gray-100 text-gray-600'
+        };
+
+        const typeIcons = {
+            'telos_step': '🎯',
+            'session': '💬',
+            'join': '🚪',
+            'vote': '🗳️',
+            'observe': '👀',
+            'analyze': '🔍',
+            'transfer': '💸',
+            'test': '🧪'
+        };
+
+        // =====================================================================
+        // Filter Management
+        // =====================================================================
+
+        async function loadFilters() {
+            try {
+                const res = await fetch(`${API_BASE}/api/events/filters`);
+                const data = await res.json();
+                if (!data.success) return;
+
+                const agentSel = document.getElementById('filter-agent');
+                (data.agents || []).forEach(a => {
+                    const opt = document.createElement('option');
+                    opt.value = a.agent_id;
+                    opt.textContent = a.display_name || a.agent_id;
+                    agentSel.appendChild(opt);
+                });
+
+                const personaSel = document.getElementById('filter-persona');
+                (data.personas || []).forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p;
+                    opt.textContent = `${personaEmoji[p] || '❓'} ${p}`;
+                    personaSel.appendChild(opt);
+                });
+
+                const typeSel = document.getElementById('filter-type');
+                (data.action_types || []).forEach(t => {
+                    const opt = document.createElement('option');
+                    opt.value = t;
+                    opt.textContent = `${typeIcons[t] || '📋'} ${t}`;
+                    typeSel.appendChild(opt);
+                });
+
+                const telosSel = document.getElementById('filter-telos');
+                (data.telos_names || []).forEach(t => {
+                    const opt = document.createElement('option');
+                    opt.value = t;
+                    opt.textContent = t;
+                    telosSel.appendChild(opt);
+                });
+            } catch (e) {
+                console.error('Error loading filters:', e);
+            }
+        }
+
+        function getFilterParams() {
+            const params = new URLSearchParams();
+            const agent = document.getElementById('filter-agent').value;
+            const persona = document.getElementById('filter-persona').value;
+            const type = document.getElementById('filter-type').value;
+            const telos = document.getElementById('filter-telos').value;
+            const status = document.getElementById('filter-status').value;
+            const search = document.getElementById('filter-search').value.trim();
+
+            if (agent) params.set('agent_id', agent);
+            if (persona) params.set('persona', persona);
+            if (type) params.set('action_type', type);
+            if (telos) params.set('telos_name', telos);
+            if (status) params.set('status', status);
+            if (search) params.set('search', search);
+
+            return params;
+        }
+
+        function applyFilters() {
+            allEvents = [];
+            lastSeenTimestamp = null;
+            document.getElementById('event-stream').innerHTML = '';
+            fetchEvents();
+        }
+
+        function resetFilters() {
+            document.getElementById('filter-agent').value = '';
+            document.getElementById('filter-persona').value = '';
+            document.getElementById('filter-type').value = '';
+            document.getElementById('filter-telos').value = '';
+            document.getElementById('filter-status').value = '';
+            document.getElementById('filter-search').value = '';
+            applyFilters();
+        }
+
+        function debounceSearch() {
+            clearTimeout(searchDebounce);
+            searchDebounce = setTimeout(() => applyFilters(), 400);
+        }
+
+        // =====================================================================
+        // Event Fetching & Rendering
+        // =====================================================================
+
+        async function fetchEvents() {
+            try {
+                const params = getFilterParams();
+                if (lastSeenTimestamp) {
+                    params.set('since', lastSeenTimestamp);
+                }
+                params.set('limit', '200');
+
+                const res = await fetch(`${API_BASE}/api/events?${params.toString()}`);
+                const data = await res.json();
+                if (!data.success) return;
+
+                const newEvents = data.events || [];
+                if (newEvents.length === 0) {
+                    if (allEvents.length === 0) {
+                        document.getElementById('loading-msg')?.remove();
+                        document.getElementById('empty-msg').classList.remove('hidden');
+                    }
+                    return;
+                }
+
+                document.getElementById('empty-msg').classList.add('hidden');
+                document.getElementById('loading-msg')?.remove();
+
+                // Dedupe by ID
+                const existingIds = new Set(allEvents.map(e => e.id));
+                const truly_new = newEvents.filter(e => !existingIds.has(e.id));
+
+                if (truly_new.length === 0) return;
+
+                // Prepend new events (they come DESC, newest first)
+                allEvents = [...truly_new, ...allEvents];
+
+                // Update last seen timestamp to the newest event
+                if (allEvents.length > 0) {
+                    lastSeenTimestamp = allEvents[0].created_at;
+                }
+
+                // Render new events at the top
+                const stream = document.getElementById('event-stream');
+                const fragment = document.createDocumentFragment();
+
+                truly_new.forEach(event => {
+                    const el = createEventCard(event);
+                    fragment.appendChild(el);
+                });
+
+                stream.insertBefore(fragment, stream.firstChild);
+
+                // Cap displayed events
+                while (stream.children.length > 500) {
+                    stream.removeChild(stream.lastChild);
+                }
+
+                updateStats();
+            } catch (e) {
+                console.error('Error fetching events:', e);
+            }
+        }
+
+        function createEventCard(event) {
+            const div = document.createElement('div');
+            const borderClass = event.success === false ? 'border-error' : (event.action_type === 'telos_step' ? 'border-info' : 'border-success');
+            const typeClass = typeColors[event.action_type] || 'bg-primary-100 text-primary-600';
+            const icon = typeIcons[event.action_type] || '📋';
+            const emoji = personaEmoji[event.persona] || '❓';
+            const displayName = event.display_name || event.agent_id;
+            const successBadge = event.success === false
+                ? '<span class="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-600 font-medium">ERROR</span>'
+                : '';
+
+            // Build detail preview
+            let detailPreview = '';
+            const details = event.action_details;
+            if (details && typeof details === 'object') {
+                const result = details.result || details.error || '';
+                if (result) {
+                    const truncated = String(result).substring(0, 200);
+                    detailPreview = `<p class="text-sm text-primary-500 mt-1 line-clamp-2">${escapeHtml(truncated)}${result.length > 200 ? '...' : ''}</p>`;
+                }
+            }
+
+            // Telos progress info
+            let telosInfo = '';
+            if (event.telos_name) {
+                const step = event.telos_current_step !== null ? event.telos_current_step : '?';
+                telosInfo = `<span class="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 border border-purple-200">${escapeHtml(event.telos_name)} ${event.telos_state === 'active' ? `(step ${step})` : `(${event.telos_state || '?'})`}</span>`;
+            }
+
+            // Emotional state
+            let emotionBadge = '';
+            if (event.emotional_state) {
+                emotionBadge = `<span class="text-xs text-primary-400 italic">${escapeHtml(event.emotional_state)}</span>`;
+            }
+
+            div.className = `event-enter bg-white rounded-lg border border-primary-200 border-l-4 ${borderClass} shadow-sm hover:shadow-md transition-shadow`;
+            div.innerHTML = `
+                <div class="detail-toggle p-3 sm:p-4" onclick="toggleDetail(this)">
+                    <div class="flex flex-col sm:flex-row sm:items-start gap-2">
+                        <div class="flex items-center gap-2 shrink-0">
+                            <time datetime="${event.created_at || ''}" title="${escapeHtml(formatLocalDatetime(event.created_at))}" class="text-xs text-primary-400 font-mono shrink-0 cursor-default">${timeAgo(event.created_at)}</time>
+                            <span class="inline-flex items-center gap-1 ${typeClass} px-2 py-0.5 rounded text-xs font-medium">${icon} ${event.action_type}</span>
+                            ${successBadge}
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <a href="/dashboard/agent/${encodeURIComponent(event.agent_id)}" onclick="event.stopPropagation()" class="font-medium text-primary-800 hover:text-primary-600 text-sm">${escapeHtml(displayName)}</a>
+                                <span class="text-xs px-1.5 py-0.5 rounded bg-primary-100 text-primary-600">${emoji} ${event.persona || 'unknown'}</span>
+                                ${telosInfo}
+                                ${emotionBadge}
+                            </div>
+                            <p class="text-sm text-primary-700 mt-0.5">${escapeHtml(event.action_summary)}</p>
+                            ${detailPreview}
+                        </div>
+                        <div class="shrink-0 text-primary-300">
+                            <svg class="w-4 h-4 detail-chevron transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                        </div>
+                    </div>
+                </div>
+                <div class="detail-content border-t border-primary-100">
+                    <div class="p-3 sm:p-4 space-y-3">
+                        ${event.observations ? `<div><p class="text-xs font-medium text-primary-500 uppercase tracking-wide mb-1">Observations</p><p class="text-sm text-primary-700">${escapeHtml(event.observations)}</p></div>` : ''}
+                        ${event.realm_principal ? `<div><p class="text-xs font-medium text-primary-500 uppercase tracking-wide mb-1">Realm</p><p class="text-sm text-primary-700 font-mono">${escapeHtml(event.realm_principal)}</p></div>` : ''}
+                        ${renderDebugChain(details)}
+                        ${details ? `<div><p class="text-xs font-medium text-primary-500 uppercase tracking-wide mb-1">Raw Details</p><pre class="event-detail text-xs bg-primary-50 border border-primary-200 rounded p-3 text-primary-700">${escapeHtml(JSON.stringify(details, null, 2))}</pre></div>` : ''}
+                    </div>
+                </div>
+            `;
+
+            return div;
+        }
+
+        function renderDebugChain(details) {
+            if (!details || !details.debug_chain || !Array.isArray(details.debug_chain) || details.debug_chain.length === 0) {
+                return '';
+            }
+
+            let html = '<div><p class="text-xs font-medium text-primary-500 uppercase tracking-wide mb-2">Execution Chain</p><div class="space-y-2">';
+
+            details.debug_chain.forEach(item => {
+                if (item.type === 'assistant') {
+                    if (item.tool_calls && item.tool_calls.length > 0) {
+                        item.tool_calls.forEach(tc => {
+                            html += `
+                                <div class="flex gap-2 items-start">
+                                    <span class="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded shrink-0 mt-0.5">TOOL</span>
+                                    <div class="min-w-0">
+                                        <span class="text-sm font-medium text-primary-800">${escapeHtml(tc.name)}</span>
+                                        <pre class="text-xs text-primary-500 mt-0.5 whitespace-pre-wrap break-all">${escapeHtml(JSON.stringify(tc.arguments, null, 2))}</pre>
+                                    </div>
+                                </div>`;
+                        });
+                    }
+                    if (item.content) {
+                        html += `
+                            <div class="flex gap-2 items-start">
+                                <span class="text-xs bg-primary-200 text-primary-600 px-1.5 py-0.5 rounded shrink-0 mt-0.5">LLM</span>
+                                <p class="text-sm text-primary-700">${escapeHtml(item.content)}</p>
+                            </div>`;
+                    }
+                } else if (item.type === 'tool_response') {
+                    html += `
+                        <div class="flex gap-2 items-start">
+                            <span class="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded shrink-0 mt-0.5">RESULT</span>
+                            <pre class="text-xs text-primary-600 whitespace-pre-wrap break-all max-h-32 overflow-y-auto">${escapeHtml((item.content || '').substring(0, 1000))}</pre>
+                        </div>`;
+                }
+            });
+
+            html += '</div></div>';
+            return html;
+        }
+
+        function toggleDetail(el) {
+            const content = el.nextElementSibling;
+            const chevron = el.querySelector('.detail-chevron');
+            content.classList.toggle('open');
+            if (content.classList.contains('open')) {
+                chevron.style.transform = 'rotate(180deg)';
+            } else {
+                chevron.style.transform = '';
+            }
+        }
+
+        // =====================================================================
+        // Stats
+        // =====================================================================
+
+        function updateStats() {
+            document.getElementById('event-count').textContent = `${allEvents.length} events`;
+            document.getElementById('stat-total').textContent = allEvents.length;
+            document.getElementById('stat-success').textContent = allEvents.filter(e => e.success !== false).length;
+            document.getElementById('stat-errors').textContent = allEvents.filter(e => e.success === false).length;
+
+            const uniqueAgents = new Set(allEvents.map(e => e.agent_id));
+            document.getElementById('stat-agents').textContent = uniqueAgents.size;
+        }
+
+        // =====================================================================
+        // Live Toggle & Polling
+        // =====================================================================
+
+        function toggleLive() {
+            isLive = !isLive;
+            const btn = document.getElementById('live-toggle');
+            const indicator = document.getElementById('live-indicator');
+
+            if (isLive) {
+                btn.textContent = '⏸ Pause';
+                indicator.innerHTML = '<span class="pulse-dot bg-green-400"></span>LIVE';
+                indicator.className = 'flex items-center gap-1.5 text-xs font-normal text-green-400';
+                startPolling();
+            } else {
+                btn.textContent = '▶ Resume';
+                indicator.innerHTML = '<span class="pulse-dot bg-yellow-400" style="animation:none"></span>PAUSED';
+                indicator.className = 'flex items-center gap-1.5 text-xs font-normal text-yellow-400';
+                stopPolling();
+            }
+        }
+
+        function startPolling() {
+            stopPolling();
+            pollInterval = setInterval(fetchEvents, 3000);
+        }
+
+        function stopPolling() {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+                pollInterval = null;
+            }
+        }
+
+        function clearEvents() {
+            allEvents = [];
+            lastSeenTimestamp = null;
+            document.getElementById('event-stream').innerHTML = '';
+            document.getElementById('empty-msg').classList.remove('hidden');
+            updateStats();
+        }
+
+        // =====================================================================
+        // Utilities
+        // =====================================================================
+
+        function timeAgo(isoStr) {
+            if (!isoStr) return '--';
+            const d = new Date(isoStr);
+            const now = Date.now();
+            const diff = Math.max(0, Math.floor((now - d.getTime()) / 1000));
+            if (diff < 5) return 'just now';
+            if (diff < 60) return `${diff}s ago`;
+            const mins = Math.floor(diff / 60);
+            if (mins < 60) return `${mins}m ago`;
+            const hrs = Math.floor(mins / 60);
+            if (hrs < 24) return `${hrs}h ago`;
+            const days = Math.floor(hrs / 24);
+            return `${days}d ago`;
+        }
+
+        function formatLocalDatetime(isoStr) {
+            if (!isoStr) return '';
+            const d = new Date(isoStr);
+            return d.toLocaleString();
+        }
+
+        // Refresh all relative timestamps every 15s
+        setInterval(() => {
+            document.querySelectorAll('time[datetime]').forEach(el => {
+                el.textContent = timeAgo(el.getAttribute('datetime'));
+            });
+        }, 15000);
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.textContent = String(str);
+            return div.innerHTML;
+        }
+
+        // =====================================================================
+        // Init
+        // =====================================================================
+
+        async function init() {
+            await loadFilters();
+            await fetchEvents();
+            startPolling();
+        }
+
+        init();
+    </script>
+</body>
+</html>
