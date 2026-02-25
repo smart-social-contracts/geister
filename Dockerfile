@@ -6,7 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Minimal packages: only what's needed for Ollama + Cloudflare tunnel
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        curl ca-certificates netcat && \
+        curl ca-certificates netcat zstd && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # --- Cloudflared installation ---
