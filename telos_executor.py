@@ -10,6 +10,7 @@ This module runs a background thread that:
 import os
 import json
 import time
+import subprocess
 import threading
 import traceback
 import requests
@@ -88,6 +89,27 @@ def wait_for_ollama(timeout: int = None) -> bool:
     return False
 
 
+def ensure_dfx_identity(identity_name: str) -> bool:
+    """Create a dfx identity if it doesn't already exist. Returns True if usable."""
+    try:
+        result = subprocess.run(
+            ["dfx", "identity", "get-principal", "--identity", identity_name],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            return True
+        # Identity doesn't exist — create it
+        log(f"  Creating dfx identity '{identity_name}'...")
+        create = subprocess.run(
+            ["dfx", "identity", "new", identity_name, "--storage-mode=plaintext"],
+            capture_output=True, text=True, timeout=10
+        )
+        return create.returncode == 0
+    except Exception as e:
+        log(f"  Warning: could not ensure dfx identity '{identity_name}': {e}")
+        return False
+
+
 def execute_telos_step(agent_id: str, step_text: str, agent_data: Dict) -> Dict[str, Any]:
     """
     Execute a single telos step for an agent.
@@ -98,6 +120,9 @@ def execute_telos_step(agent_id: str, step_text: str, agent_data: Dict) -> Dict[
         # Get agent profile info
         display_name = agent_data.get('display_name', agent_id)
         persona = agent_data.get('persona', 'compliant')
+        
+        # Ensure dfx identity exists for this agent (auto-create if missing)
+        ensure_dfx_identity(agent_id)
         
         # Get agent's principal and realm context for tool calls
         agent_principal = agent_data.get('principal', '')
@@ -229,19 +254,35 @@ IMPORTANT RULES:
                 })
         
         # If final_answer is still None (LLM kept calling tools for all iterations),
-        # build from accumulated content or last assistant message
+        # make one final call WITHOUT tools to force a text summary
         if final_answer is None:
-            if accumulated_content:
-                final_answer = "\n".join(accumulated_content)
-            else:
-                # Last resort: grab last assistant content from messages
-                for msg in reversed(messages):
-                    if msg.get('role') == 'assistant' and msg.get('content', '').strip():
-                        final_answer = msg['content'].strip()
-                        break
+            log(f"  [{display_name}] Max iterations reached, requesting summary...")
+            messages.append({
+                "role": "user",
+                "content": "Summarise what you just did and what happened. Be specific about the actions taken and any results or errors. Do NOT call any more tools."
+            })
+            try:
+                summary_resp = requests.post(f"{OLLAMA_URL}/api/chat", json={
+                    "model": DEFAULT_MODEL,
+                    "messages": messages,
+                    "stream": False
+                    # No tools — forces text response
+                }, timeout=(10, 60))
+                if summary_resp.status_code == 200:
+                    summary_msg = summary_resp.json().get('message', {})
+                    summary_text = summary_msg.get('content', '').strip()
+                    if summary_text:
+                        final_answer = summary_text
+                        messages.append(summary_msg)
+            except Exception as summary_err:
+                log(f"  [{display_name}] Summary request failed: {summary_err}")
+
+            # Fallback if summary call also failed
             if not final_answer:
-                final_answer = f"Step completed ({len(tools_called)} tool calls executed)."
-            log(f"  [{display_name}] Max iterations reached, using accumulated answer")
+                if accumulated_content:
+                    final_answer = "\n".join(accumulated_content)
+                else:
+                    final_answer = f"Step completed ({len(tools_called)} tool calls executed)."
         
         # Build debug chain from messages for memory storage
         debug_chain = []
