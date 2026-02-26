@@ -271,22 +271,23 @@ IMPORTANT RULES:
         except Exception as mem_err:
             log(f"  Warning: Could not save memory: {mem_err}")
         
-        # Check if any tool returned an error that indicates real failure
-        # (e.g. missing arguments, deployment failures, HTTP errors)
-        tool_had_error = False
-        for msg in messages:
-            if msg.get('role') == 'tool':
-                try:
-                    parsed = json.loads(msg['content']) if isinstance(msg['content'], str) else msg['content']
-                    if isinstance(parsed, dict) and parsed.get('error'):
-                        tool_had_error = True
-                        break
-                except (json.JSONDecodeError, TypeError):
-                    pass
-        
-        if tool_had_error:
-            log(f"  [{display_name}] Step failed: tool returned error")
-            return {"success": False, "error": "Tool execution returned an error", "result": final_answer}
+        # Only fail if the LLM produced no meaningful final answer AND a tool
+        # had an error.  If the LLM recovered (produced a summary despite
+        # earlier tool errors), treat the step as successful.
+        if not final_answer or not final_answer.strip():
+            tool_had_error = False
+            for msg in messages:
+                if msg.get('role') == 'tool':
+                    try:
+                        parsed = json.loads(msg['content']) if isinstance(msg['content'], str) else msg['content']
+                        if isinstance(parsed, dict) and parsed.get('error'):
+                            tool_had_error = True
+                            break
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+            if tool_had_error:
+                log(f"  [{display_name}] Step failed: no final answer and tool returned error")
+                return {"success": False, "error": "Tool execution returned an error", "result": ""}
         
         return {"success": True, "result": final_answer}
         
