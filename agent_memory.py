@@ -204,17 +204,21 @@ class AgentMemory:
                     ))
                     profile = cursor.fetchone()
                     
-                    # Auto-assign default telos to new agents (only if they don't already have one)
+                    # Auto-assign telos to new agents (only if they don't already have one)
                     cursor.execute("SELECT id FROM agent_telos WHERE agent_id = %s LIMIT 1", (self.agent_id,))
                     existing_telos = cursor.fetchone()
                     if not existing_telos:
-                        cursor.execute("SELECT id FROM telos_templates WHERE is_default = TRUE LIMIT 1")
-                        default_tpl = cursor.fetchone()
-                        if default_tpl:
+                        # Founders get the Realm Founder telos; everyone else gets the default
+                        if self.persona == 'founder':
+                            cursor.execute("SELECT id FROM telos_templates WHERE name = 'Realm Founder' LIMIT 1")
+                        else:
+                            cursor.execute("SELECT id FROM telos_templates WHERE is_default = TRUE LIMIT 1")
+                        tpl = cursor.fetchone()
+                        if tpl:
                             cursor.execute("""
                                 INSERT INTO agent_telos (agent_id, telos_template_id, state, current_step, step_results)
                                 VALUES (%s, %s, 'active', 0, '{}')
-                            """, (self.agent_id, default_tpl['id']))
+                            """, (self.agent_id, tpl['id']))
                 
                 self.connection.commit()
                 return dict(profile) if profile else {}
@@ -471,6 +475,7 @@ def list_all_agents() -> List[Dict]:
             cursor.execute("""
                 SELECT p.agent_id, p.principal, p.display_name, p.persona, 
                        p.total_sessions, p.created_at, p.last_active_at,
+                       p.metadata,
                        t.state as telos_state, t.current_step, t.custom_telos,
                        tt.name as telos_name, tt.steps as telos_steps
                 FROM agent_profiles p
@@ -539,8 +544,8 @@ def _seed_default_telos_template():
                     'Find a realm you like',
                     'Join the realm',
                     'Set your avatar',
-                    'Check pending invoices',
-                    'Pay pending invoices using the icw tool',
+                    'Use db_get with entity_type Invoice to list your pending invoices',
+                    'Use pay_invoice for each pending invoice (pass invoice_id, amount, and the vault canister ID as recipient)',
                     'Vote on proposals',
                     'Create a proposal'
                 ]
@@ -877,6 +882,188 @@ def remove_agent_telos(agent_id: str) -> bool:
             cursor.execute("DELETE FROM agent_telos WHERE agent_id = %s", (agent_id,))
             conn.commit()
             return cursor.rowcount > 0
+    finally:
+        if conn:
+            conn.close()
+
+
+def delete_agent(agent_id: str) -> bool:
+    """Delete an agent and all associated data (telos, memories)."""
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM agent_telos WHERE agent_id = %s", (agent_id,))
+            cursor.execute("DELETE FROM agent_memories WHERE agent_id = %s", (agent_id,))
+            cursor.execute("DELETE FROM agent_profiles WHERE agent_id = %s", (agent_id,))
+            deleted = cursor.rowcount > 0
+            conn.commit()
+            return deleted
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_all_events(
+    agent_id: str = None,
+    persona: str = None,
+    action_type: str = None,
+    telos_name: str = None,
+    since: str = None,
+    search: str = None,
+    success_filter: str = None,
+    limit: int = 100
+) -> List[Dict]:
+    """Get events across all agents for the monitor page.
+    
+    Args:
+        agent_id: Filter by specific agent
+        persona: Filter by persona type
+        action_type: Filter by event type (telos_step, session, join, vote, etc.)
+        telos_name: Filter by telos template name
+        since: ISO timestamp - only return events after this time
+        search: Free-text search on action_summary
+        success_filter: 'success', 'error', or None for all
+        limit: Max events to return
+    """
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            conditions = []
+            params = []
+
+            if agent_id:
+                conditions.append("m.agent_id = %s")
+                params.append(agent_id)
+
+            if persona:
+                conditions.append("m.persona = %s")
+                params.append(persona)
+
+            if action_type:
+                conditions.append("m.action_type = %s")
+                params.append(action_type)
+
+            if telos_name:
+                conditions.append("tt.name = %s")
+                params.append(telos_name)
+
+            if since:
+                conditions.append("m.created_at > %s")
+                params.append(since)
+
+            if search:
+                conditions.append("(m.action_summary ILIKE %s OR m.observations ILIKE %s)")
+                params.extend([f"%{search}%", f"%{search}%"])
+
+            where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+            params.append(limit)
+            cursor.execute(f"""
+                SELECT m.id, m.agent_id, m.principal, COALESCE(m.persona, p.persona) as persona, m.realm_principal,
+                       m.action_type, m.action_summary, m.action_details,
+                       m.emotional_state, m.observations, m.created_at,
+                       p.display_name,
+                       tt.name as telos_name,
+                       at.current_step as telos_current_step,
+                       at.state as telos_state
+                FROM agent_memories m
+                LEFT JOIN agent_profiles p ON m.agent_id = p.agent_id
+                LEFT JOIN agent_telos at ON m.agent_id = at.agent_id
+                LEFT JOIN telos_templates tt ON at.telos_template_id = tt.id
+                {where_clause}
+                ORDER BY m.created_at DESC
+                LIMIT %s
+            """, params)
+
+            results = []
+            for row in cursor.fetchall():
+                event = dict(row)
+                # Parse action_details if string
+                if event.get('action_details') and isinstance(event['action_details'], str):
+                    try:
+                        event['action_details'] = json.loads(event['action_details'])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                # Determine success from action_details or action_type
+                details = event.get('action_details') or {}
+                if isinstance(details, dict):
+                    result_text = details.get('result', '')
+                    error_text = details.get('error', '')
+                    debug_chain = details.get('debug_chain', [])
+                    # Check for errors in debug chain
+                    has_error = bool(error_text)
+                    if not has_error and isinstance(debug_chain, list):
+                        for item in debug_chain:
+                            if isinstance(item, dict) and 'error' in str(item.get('content', '')).lower():
+                                has_error = True
+                                break
+                    event['success'] = not has_error
+                else:
+                    event['success'] = True
+                # Serialize datetime
+                if event.get('created_at'):
+                    event['created_at'] = event['created_at'].isoformat()
+                results.append(event)
+
+            # Apply success filter after computing success
+            if success_filter == 'success':
+                results = [e for e in results if e.get('success')]
+            elif success_filter == 'error':
+                results = [e for e in results if not e.get('success')]
+
+            return results
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_event_filter_options() -> Dict:
+    """Get available filter options for the monitor page."""
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT DISTINCT action_type FROM agent_memories ORDER BY action_type")
+            action_types = [row[0] for row in cursor.fetchall()]
+
+            cursor.execute("SELECT DISTINCT persona FROM agent_memories WHERE persona IS NOT NULL ORDER BY persona")
+            personas = [row[0] for row in cursor.fetchall()]
+
+            cursor.execute("""
+                SELECT DISTINCT p.agent_id, p.display_name
+                FROM agent_profiles p
+                ORDER BY p.display_name
+            """)
+            agents = [{"agent_id": row[0], "display_name": row[1]} for row in cursor.fetchall()]
+
+            cursor.execute("SELECT DISTINCT name FROM telos_templates ORDER BY name")
+            telos_names = [row[0] for row in cursor.fetchall()]
+
+            return {
+                "action_types": action_types,
+                "personas": personas,
+                "agents": agents,
+                "telos_names": telos_names
+            }
+    finally:
+        if conn:
+            conn.close()
+
+
+def delete_all_agents() -> int:
+    """Delete all agents and all associated data. Returns count of deleted agents."""
+    conn = None
+    try:
+        conn = _get_db_connection()
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM agent_telos")
+            cursor.execute("DELETE FROM agent_memories")
+            cursor.execute("DELETE FROM agent_profiles")
+            count = cursor.rowcount
+            conn.commit()
+            return count
     finally:
         if conn:
             conn.close()

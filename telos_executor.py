@@ -24,10 +24,11 @@ from agent_memory import (
 from realm_tools import REALM_TOOLS, execute_tool
 
 # Configuration
-EXECUTOR_INTERVAL_SECONDS = int(os.getenv('TELOS_EXECUTOR_INTERVAL', '60'))  # Check every 60 seconds
+EXECUTOR_INTERVAL_SECONDS = 0  # No delay between execution cycles
 OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434')
 DEFAULT_MODEL = os.getenv('LLM_MODEL', 'gpt-oss:20b')
 DEFAULT_NETWORK = os.getenv('NETWORK', 'staging')
+OLLAMA_READY_TIMEOUT = int(os.getenv('OLLAMA_READY_TIMEOUT', '120'))  # seconds
 
 # Global state
 _executor_thread: Optional[threading.Thread] = None
@@ -71,6 +72,22 @@ def get_execution_log(limit: int = 50) -> List[Dict]:
     return _execution_log[:limit]
 
 
+def wait_for_ollama(timeout: int = None) -> bool:
+    """Block until Ollama is reachable. Returns True if ready, False on timeout."""
+    timeout = timeout or OLLAMA_READY_TIMEOUT
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            resp = requests.get(OLLAMA_URL, timeout=5)
+            if resp.status_code == 200:
+                return True
+        except Exception:
+            pass
+        time.sleep(2)
+    log(f"Ollama not ready after {timeout}s")
+    return False
+
+
 def execute_telos_step(agent_id: str, step_text: str, agent_data: Dict) -> Dict[str, Any]:
     """
     Execute a single telos step for an agent.
@@ -82,12 +99,21 @@ def execute_telos_step(agent_id: str, step_text: str, agent_data: Dict) -> Dict[
         display_name = agent_data.get('display_name', agent_id)
         persona = agent_data.get('persona', 'compliant')
         
-        # Get agent's principal for tool context
+        # Get agent's principal and realm context for tool calls
         agent_principal = agent_data.get('principal', '')
+        metadata = agent_data.get('metadata') or {}
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except (json.JSONDecodeError, TypeError):
+                metadata = {}
+        realm_principal = metadata.get('realm_id', '')
+        realm_name = metadata.get('realm_name', '')
         
         # Build the prompt for this step
+        realm_context = f"\nYou are operating in the realm \"{realm_name}\" (canister ID: {realm_principal})." if realm_principal else ""
         system_prompt = f"""You are {display_name}, a {persona} AI agent in the Realms ecosystem.
-Your principal ID is: {agent_principal}
+Your principal ID is: {agent_principal}{realm_context}
 
 You have a mission (telos) to complete. Your current step is:
 "{step_text}"
@@ -156,11 +182,12 @@ IMPORTANT RULES:
                 final_answer = content
                 break
             
-            # If still no tool calls after nudging, accept text but log warning
+            # If still no tool calls after nudging, fail the step
             if not tool_calls:
-                final_answer = content or "Step completed (no tool called)."
                 if not tools_called:
-                    log(f"  [{display_name}] WARNING: No tools were called for this step")
+                    log(f"  [{display_name}] FAILED: No tools were called for this step")
+                    return {"success": False, "error": "LLM did not call any tools for this step", "result": content}
+                final_answer = content or "Step completed."
                 break
             
             # Execute tool calls
@@ -176,11 +203,20 @@ IMPORTANT RULES:
                     tool_args, 
                     network=DEFAULT_NETWORK,
                     realm_folder='.',
+                    realm_principal=realm_principal,
                     user_principal=agent_principal,
                     user_identity=agent_id  # Use agent's dfx identity for calls
                 )
                 
                 log(f"  [{display_name}] Result: {tool_result[:150]}")
+                
+                # Check if the tool returned an error
+                try:
+                    parsed_result = json.loads(tool_result) if isinstance(tool_result, str) else tool_result
+                    if isinstance(parsed_result, dict) and parsed_result.get('error'):
+                        log(f"  [{display_name}] Tool returned error: {parsed_result['error'][:150]}")
+                except (json.JSONDecodeError, TypeError):
+                    parsed_result = None
                 
                 messages.append({
                     "role": "tool",
@@ -220,7 +256,7 @@ IMPORTANT RULES:
         
         # Save to agent memory with full conversation chain
         try:
-            memory = AgentMemory(agent_id)
+            memory = AgentMemory(agent_id, persona=agent_data.get('persona'))
             memory.remember(
                 action_type="telos_step",
                 action_summary=f"Completed: {step_text}",
@@ -234,6 +270,23 @@ IMPORTANT RULES:
             memory.close()
         except Exception as mem_err:
             log(f"  Warning: Could not save memory: {mem_err}")
+        
+        # Check if any tool returned an error that indicates real failure
+        # (e.g. missing arguments, deployment failures, HTTP errors)
+        tool_had_error = False
+        for msg in messages:
+            if msg.get('role') == 'tool':
+                try:
+                    parsed = json.loads(msg['content']) if isinstance(msg['content'], str) else msg['content']
+                    if isinstance(parsed, dict) and parsed.get('error'):
+                        tool_had_error = True
+                        break
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        
+        if tool_had_error:
+            log(f"  [{display_name}] Step failed: tool returned error")
+            return {"success": False, "error": "Tool execution returned an error", "result": final_answer}
         
         return {"success": True, "result": final_answer}
         
@@ -260,6 +313,11 @@ def process_active_agents():
             display_name = agent.get('display_name', agent_id)
             
             try:
+                # Gate on Ollama readiness before executing
+                if not wait_for_ollama():
+                    log(f"  [{display_name}] Skipping — Ollama unavailable")
+                    continue
+
                 # Get full telos info
                 telos = get_agent_telos(agent_id)
                 if not telos:
@@ -348,11 +406,10 @@ def executor_loop():
         except Exception as e:
             log(f"Error in executor loop: {e}")
         
-        # Sleep in small increments to allow quick shutdown
-        for _ in range(EXECUTOR_INTERVAL_SECONDS):
-            if not _executor_running:
-                break
-            time.sleep(1)
+        # Brief yield to allow quick shutdown
+        if not _executor_running:
+            break
+        time.sleep(0.1)
     
     log("Executor stopped")
 
@@ -368,7 +425,7 @@ def start_executor():
     _executor_running = True
     _executor_thread = threading.Thread(target=executor_loop, daemon=True)
     _executor_thread.start()
-    log(f"Executor started (interval: {EXECUTOR_INTERVAL_SECONDS}s)")
+    log("Executor started (no delay between cycles)")
     return True
 
 
