@@ -89,25 +89,32 @@ def wait_for_ollama(timeout: int = None) -> bool:
     return False
 
 
-def ensure_dfx_identity(identity_name: str) -> bool:
-    """Create a dfx identity if it doesn't already exist. Returns True if usable."""
+def ensure_dfx_identity(identity_name: str) -> str:
+    """Create a dfx identity if it doesn't already exist. Returns the principal (or empty string on failure)."""
     try:
         result = subprocess.run(
             ["dfx", "identity", "get-principal", "--identity", identity_name],
             capture_output=True, text=True, timeout=10
         )
         if result.returncode == 0:
-            return True
+            return result.stdout.strip()
         # Identity doesn't exist — create it
         log(f"  Creating dfx identity '{identity_name}'...")
         create = subprocess.run(
             ["dfx", "identity", "new", identity_name, "--storage-mode=plaintext"],
             capture_output=True, text=True, timeout=10
         )
-        return create.returncode == 0
+        if create.returncode == 0:
+            # Fetch the newly created principal
+            result2 = subprocess.run(
+                ["dfx", "identity", "get-principal", "--identity", identity_name],
+                capture_output=True, text=True, timeout=10
+            )
+            return result2.stdout.strip() if result2.returncode == 0 else ''
+        return ''
     except Exception as e:
         log(f"  Warning: could not ensure dfx identity '{identity_name}': {e}")
-        return False
+        return ''
 
 
 def execute_telos_step(agent_id: str, step_text: str, agent_data: Dict) -> Dict[str, Any]:
@@ -122,10 +129,10 @@ def execute_telos_step(agent_id: str, step_text: str, agent_data: Dict) -> Dict[
         persona = agent_data.get('persona', 'compliant')
         
         # Ensure dfx identity exists for this agent (auto-create if missing)
-        ensure_dfx_identity(agent_id)
+        dfx_principal = ensure_dfx_identity(agent_id)
         
         # Get agent's principal and realm context for tool calls
-        agent_principal = agent_data.get('principal', '')
+        agent_principal = agent_data.get('principal', '') or dfx_principal
         metadata = agent_data.get('metadata') or {}
         if isinstance(metadata, str):
             try:
