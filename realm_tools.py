@@ -174,7 +174,7 @@ def list_realms(network: str = "staging", realm_folder: str = ".") -> str:
     """List all available realms in the mundus registry."""
     import re
     
-    cmd = ["realms", "registry", "list", "--network", network]
+    cmd = ["realms", "registry", "realm", "list", "--network", network]
     
     try:
         result = subprocess.run(
@@ -233,7 +233,7 @@ def list_realms(network: str = "staging", realm_folder: str = ".") -> str:
 
 def search_realm(query: str, network: str = "staging", realm_folder: str = ".") -> str:
     """Search for a realm by name in the mundus registry."""
-    cmd = ["realms", "registry", "search", "--query", query, "--network", network]
+    cmd = ["realms", "registry", "realm", "search", "--query", query, "--network", network]
     
     try:
         result = subprocess.run(
@@ -462,7 +462,7 @@ def get_my_principal(network: str = "staging", realm_folder: str = ".", realm_pr
 
 def realm_status(network: str = "staging", realm_folder: str = ".", realm_principal: str = "", identity: str = "") -> str:
     """Get the current status of the realm (users, proposals, votes, extensions)."""
-    return _run_dfx_call(
+    status_raw = _run_dfx_call(
         canister="realm_backend",
         method="status",
         args="()",
@@ -471,6 +471,27 @@ def realm_status(network: str = "staging", realm_folder: str = ".", realm_princi
         realm_principal=realm_principal,
         identity=identity
     )
+    # Enrich status with vote tallies (canister status doesn't include them)
+    try:
+        status_data = json.loads(status_raw) if isinstance(status_raw, str) else status_raw
+        proposals_raw = get_proposals(network=network, realm_folder=realm_folder, identity=identity)
+        proposals_data = json.loads(proposals_raw) if isinstance(proposals_raw, str) else proposals_raw
+        resp = proposals_data.get("response", proposals_data)
+        if isinstance(resp, str):
+            resp = json.loads(resp)
+        props = resp.get("data", {}).get("proposals", []) if isinstance(resp, dict) else []
+        total_votes = sum(
+            sum(p.get("votes", {}).values()) for p in props if isinstance(p, dict)
+        )
+        vote_summary = {p["id"]: p.get("votes", {}) for p in props if isinstance(p, dict) and p.get("id")}
+        # Inject into status
+        inner = status_data.get("data", {}).get("status", status_data) if isinstance(status_data, dict) else status_data
+        if isinstance(inner, dict):
+            inner["total_votes_cast"] = total_votes
+            inner["votes_by_proposal"] = vote_summary
+        return json.dumps(status_data)
+    except Exception:
+        return status_raw
 
 
 def fetch_codex(codex_id: str, network: str = "staging", realm_principal: str = "", realm_folder: str = ".") -> Optional[Dict[str, Any]]:
@@ -739,6 +760,41 @@ def icw_transfer_tokens(recipient: str, amount: str, token: str = "ckbtc", memo:
             return json.dumps({"error": result.stderr.strip() or "Transfer failed"})
     except Exception as e:
         return json.dumps({"error": str(e)})
+
+
+def pay_invoice(invoice_id: str, amount: str, recipient: str, token: str = "ckbtc", network: str = "staging", realm_folder: str = ".") -> str:
+    """Pay a pending invoice by transferring tokens to the vault canister with the invoice's subaccount.
+    
+    The subaccount is automatically computed from the invoice ID (padded to 32 bytes, hex-encoded).
+    Use db_get('Invoice') first to get the invoice_id, amount, and vault canister ID (recipient).
+    
+    Args:
+        invoice_id: The invoice ID (e.g., 'inv_44843786bee9')
+        amount: Amount to pay in token units (e.g., '1e-8' for 1 satoshi of ckBTC)
+        recipient: The vault canister ID to pay to (from realm_status or invoice payment details)
+        token: Token to use for payment (default: ckbtc)
+    """
+    # Compute subaccount hex: invoice ID encoded as bytes, padded to 32 bytes with null bytes
+    subaccount_hex = invoice_id.encode().ljust(32, b'\x00').hex()
+    
+    cmd = ["icw", "--token", token, "transfer", recipient, amount, "--subaccount", subaccount_hex]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=_get_env())
+        if result.returncode == 0:
+            return json.dumps({
+                "success": True,
+                "message": result.stdout.strip(),
+                "invoice_id": invoice_id,
+                "token": token,
+                "amount": amount,
+                "recipient": recipient,
+                "subaccount": subaccount_hex
+            })
+        else:
+            return json.dumps({"error": result.stderr.strip() or "Payment failed", "invoice_id": invoice_id})
+    except Exception as e:
+        return json.dumps({"error": str(e), "invoice_id": invoice_id})
 
 
 def icw_get_address(network: str = "staging", realm_folder: str = ".") -> str:
@@ -1208,6 +1264,37 @@ REALM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "pay_invoice",
+            "description": "Pay a pending invoice. First use db_get('Invoice') to list invoices and get invoice_id, amount, and the vault canister ID (recipient). The subaccount is computed automatically from the invoice ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "invoice_id": {
+                        "type": "string",
+                        "description": "The invoice ID from db_get('Invoice') results (e.g., 'inv_44843786bee9')"
+                    },
+                    "amount": {
+                        "type": "string",
+                        "description": "Amount to pay in token units (e.g., '1e-8' for 1 satoshi of ckBTC). Get this from the invoice amount field."
+                    },
+                    "recipient": {
+                        "type": "string",
+                        "description": "The vault canister ID to pay to. Get this from realm_status vault extension info or the realm's backend_url canister."
+                    },
+                    "token": {
+                        "type": "string",
+                        "description": "Token for payment",
+                        "enum": ["ckbtc", "cketh", "icp", "ckusdc", "ckusdt", "realms"],
+                        "default": "ckbtc"
+                    }
+                },
+                "required": ["invoice_id", "amount", "recipient"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "icw_get_address",
             "description": "Get your wallet address (principal ID) for receiving tokens.",
             "parameters": {"type": "object", "properties": {}, "required": []}
@@ -1221,7 +1308,7 @@ _REALM_ID_PARAM = {
     "type": "string",
     "description": "Canister ID of the realm to interact with (from list_realms results). Always pass this when targeting a specific realm."
 }
-_REGISTRY_ONLY_TOOLS = {"list_realms", "search_realm", "icw_check_balance", "icw_transfer_tokens", "icw_get_address"}
+_REGISTRY_ONLY_TOOLS = {"list_realms", "search_realm", "icw_check_balance", "icw_transfer_tokens", "icw_get_address", "pay_invoice"}
 for _tool in REALM_TOOLS:
     _func_name = _tool["function"]["name"]
     if _func_name not in _REGISTRY_ONLY_TOOLS:
@@ -1260,6 +1347,7 @@ TOOL_FUNCTIONS = {
     # ICW Token Tools
     "icw_check_balance": icw_check_balance,
     "icw_transfer_tokens": icw_transfer_tokens,
+    "pay_invoice": pay_invoice,
     "icw_get_address": icw_get_address,
 }
 
@@ -1317,4 +1405,8 @@ def execute_tool(tool_name: str, arguments: dict, network: str = "staging", real
     if "identity" not in valid_params:
         del filtered_args["identity"]
     
-    return func(**filtered_args)
+    try:
+        return func(**filtered_args)
+    except TypeError as e:
+        # LLM omitted a required argument – return error so it can self-correct
+        return json.dumps({"error": str(e)})

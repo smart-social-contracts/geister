@@ -144,14 +144,19 @@ def execute_telos_step(agent_id: str, step_text: str, agent_data: Dict) -> Dict[
         
         # Build the prompt for this step
         realm_context = f"\nYou are operating in the realm \"{realm_name}\" (canister ID: {realm_principal})." if realm_principal else ""
+        available_tools = ", ".join(sorted(t["function"]["name"] for t in REALM_TOOLS))
         system_prompt = f"""You are {display_name}, a {persona} AI agent in the Realms ecosystem.
 Your principal ID is: {agent_principal}{realm_context}
 
 You have a mission (telos) to complete. Your current step is:
 "{step_text}"
 
+AVAILABLE TOOLS (only these exist — do NOT invent or guess other tool names):
+{available_tools}
+
 IMPORTANT RULES:
 - You MUST call the appropriate tool function to complete this step. DO NOT just describe what you would do.
+- ONLY use tools from the list above. Do NOT call tools that are not listed.
 - Use your principal ID ({agent_principal}) when tools require a principal_id parameter.
 - After the tool returns a result, summarize what happened in 1-2 sentences.
 - If the tool returns an error, explain the error briefly.
