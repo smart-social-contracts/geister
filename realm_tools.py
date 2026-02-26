@@ -131,7 +131,9 @@ def _run_realms_cli(
     subcommand: list,
     network: str = "staging",
     realm_folder: str = ".",
-    timeout: int = 30
+    timeout: int = 30,
+    realm_principal: str = "",
+    identity: str = ""
 ) -> str:
     """
     Run a realms CLI command.
@@ -141,12 +143,41 @@ def _run_realms_cli(
         network: Network to use
         realm_folder: Working directory
         timeout: Command timeout in seconds
+        realm_principal: Canister ID — when set, a temp dfx.json is created
+        identity: dfx identity to use
     
     Returns:
         Command output or error message
     """
+    import tempfile
+
+    # When realm_principal is provided, create a minimal temp dfx.json
+    # so the realms CLI resolves the canister correctly.
+    tmp_dir = None
+    effective_folder = realm_folder
+    effective_subcommand = list(subcommand)
+    if realm_principal:
+        tmp_dir = tempfile.mkdtemp(prefix="realms_cli_")
+        dfx_json = {
+            "canisters": {
+                "realm_backend": {
+                    "type": "custom",
+                    "candid": "realm_backend.did",
+                    "build": "",
+                    "remote": {"id": {network: realm_principal}}
+                }
+            }
+        }
+        with open(os.path.join(tmp_dir, "dfx.json"), "w") as f:
+            json.dump(dfx_json, f)
+        effective_folder = tmp_dir
+        # Replace -f realm_folder with -f tmp_dir in subcommand
+        effective_subcommand = [tmp_dir if s == realm_folder else s for s in effective_subcommand]
+
     # Network flag goes after 'realms' and before subcommand args
-    cmd = ["realms", subcommand[0], "-n", network] + subcommand[1:]
+    cmd = ["realms", effective_subcommand[0], "-n", network] + effective_subcommand[1:]
+    if identity:
+        cmd.extend(["--identity", identity])
     
     try:
         result = subprocess.run(
@@ -154,7 +185,7 @@ def _run_realms_cli(
             capture_output=True,
             text=True,
             timeout=timeout,
-            cwd=realm_folder,
+            cwd=effective_folder,
             env=_get_env()
         )
         if result.returncode == 0:
@@ -166,6 +197,10 @@ def _run_realms_cli(
     except Exception as e:
         traceback.print_exc()
         return json.dumps({"error": str(e)})
+    finally:
+        if tmp_dir:
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 # =============================================================================
@@ -523,7 +558,7 @@ def fetch_codex(codex_id: str, network: str = "staging", realm_principal: str = 
     return None
 
 
-def db_get(entity_type: str, entity_id: Optional[str] = None, network: str = "staging", realm_folder: str = ".") -> str:
+def db_get(entity_type: str, entity_id: Optional[str] = None, network: str = "staging", realm_folder: str = ".", realm_principal: str = "", identity: str = "") -> str:
     """Get entities from the realm database. If entity_id is provided, get a specific entity."""
     # Normalize entity_type to title case (e.g., 'codex' -> 'Codex')
     entity_type = entity_type.title()
@@ -533,11 +568,13 @@ def db_get(entity_type: str, entity_id: Optional[str] = None, network: str = "st
     return _run_realms_cli(
         subcommand=subcommand,
         network=network,
-        realm_folder=realm_folder
+        realm_folder=realm_folder,
+        realm_principal=realm_principal,
+        identity=identity
     )
 
 
-def db_schema(network: str = "staging", realm_folder: str = ".") -> str:
+def db_schema(network: str = "staging", realm_folder: str = ".", realm_principal: str = "", identity: str = "") -> str:
     """Get the database schema showing all entity types, fields, and relationships.
     
     Use this to discover what entity types are available before querying with db_get.
@@ -546,7 +583,9 @@ def db_schema(network: str = "staging", realm_folder: str = ".") -> str:
     return _run_realms_cli(
         subcommand=subcommand,
         network=network,
-        realm_folder=realm_folder
+        realm_folder=realm_folder,
+        realm_principal=realm_principal,
+        identity=identity
     )
 
 
@@ -603,7 +642,7 @@ def get_proposals(status: Optional[str] = None, network: str = "staging", realm_
     )
 
 
-def get_proposal(proposal_id: str, network: str = "staging", realm_folder: str = ".", identity: str = "") -> str:
+def get_proposal(proposal_id: str, network: str = "staging", realm_folder: str = ".", identity: str = "", realm_principal: str = "") -> str:
     """Get details of a specific proposal."""
     return _run_extension_call(
         extension="voting",
@@ -611,11 +650,12 @@ def get_proposal(proposal_id: str, network: str = "staging", realm_folder: str =
         args={"proposal_id": proposal_id},
         network=network,
         realm_folder=realm_folder,
-        identity=identity
+        identity=identity,
+        realm_principal=realm_principal
     )
 
 
-def cast_vote(proposal_id: str, vote: str, voter_id: str, network: str = "staging", realm_folder: str = ".", identity: str = "") -> str:
+def cast_vote(proposal_id: str, vote: str, voter_id: str, network: str = "staging", realm_folder: str = ".", identity: str = "", realm_principal: str = "") -> str:
     """Cast a vote on a proposal (yes/no/abstain)."""
     if vote not in ["yes", "no", "abstain"]:
         return json.dumps({"error": f"vote must be 'yes', 'no', or 'abstain', got '{vote}'"})
@@ -626,11 +666,12 @@ def cast_vote(proposal_id: str, vote: str, voter_id: str, network: str = "stagin
         args={"proposal_id": proposal_id, "vote": vote, "voter": voter_id},
         network=network,
         realm_folder=realm_folder,
-        identity=identity
+        identity=identity,
+        realm_principal=realm_principal
     )
 
 
-def get_my_vote(proposal_id: str, voter_id: str, network: str = "staging", realm_folder: str = ".", identity: str = "") -> str:
+def get_my_vote(proposal_id: str, voter_id: str, network: str = "staging", realm_folder: str = ".", identity: str = "", realm_principal: str = "") -> str:
     """Check if you have already voted on a proposal."""
     return _run_extension_call(
         extension="voting",
@@ -638,11 +679,12 @@ def get_my_vote(proposal_id: str, voter_id: str, network: str = "staging", realm
         args={"proposal_id": proposal_id, "voter": voter_id},
         network=network,
         realm_folder=realm_folder,
-        identity=identity
+        identity=identity,
+        realm_principal=realm_principal
     )
 
 
-def submit_proposal(title: str, description: str, proposer_id: str, code_url: str = "", network: str = "staging", realm_folder: str = ".", identity: str = "") -> str:
+def submit_proposal(title: str, description: str, proposer_id: str, code_url: str = "", network: str = "staging", realm_folder: str = ".", identity: str = "", realm_principal: str = "") -> str:
     """Submit a new proposal for voting."""
     # code_url is required by the voting extension - provide default if empty
     if not code_url:
@@ -661,7 +703,8 @@ def submit_proposal(title: str, description: str, proposer_id: str, code_url: st
         args=args,
         network=network,
         realm_folder=realm_folder,
-        identity=identity
+        identity=identity,
+        realm_principal=realm_principal
     )
 
 
@@ -669,11 +712,11 @@ def submit_proposal(title: str, description: str, proposer_id: str, code_url: st
 # Economic / Vault Tools
 # =============================================================================
 
-def get_balance(principal_id: Optional[str] = None, network: str = "staging", realm_folder: str = ".") -> str:
+def get_balance(principal_id: Optional[str] = None, network: str = "staging", realm_folder: str = ".", realm_principal: str = "", identity: str = "") -> str:
     """Get token balance for a principal in the vault."""
     # If no principal provided, get our own first
     if not principal_id:
-        principal_result = get_my_principal(network=network, realm_folder=realm_folder)
+        principal_result = get_my_principal(network=network, realm_folder=realm_folder, realm_principal=realm_principal, identity=identity)
         try:
             # Parse the JSON result to extract principal
             data = json.loads(principal_result)
@@ -690,14 +733,16 @@ def get_balance(principal_id: Optional[str] = None, network: str = "staging", re
         function="get_balance",
         args={"principal_id": principal_id},
         network=network,
-        realm_folder=realm_folder
+        realm_folder=realm_folder,
+        realm_principal=realm_principal,
+        identity=identity
     )
 
 
-def get_transactions(principal_id: Optional[str] = None, network: str = "staging", realm_folder: str = ".") -> str:
+def get_transactions(principal_id: Optional[str] = None, network: str = "staging", realm_folder: str = ".", realm_principal: str = "", identity: str = "") -> str:
     """Get transaction history for a principal."""
     if not principal_id:
-        principal_result = get_my_principal(network=network, realm_folder=realm_folder)
+        principal_result = get_my_principal(network=network, realm_folder=realm_folder, realm_principal=realm_principal, identity=identity)
         try:
             data = json.loads(principal_result)
             if isinstance(data, str):
@@ -712,18 +757,22 @@ def get_transactions(principal_id: Optional[str] = None, network: str = "staging
         function="get_transactions",
         args={"principal_id": principal_id},
         network=network,
-        realm_folder=realm_folder
+        realm_folder=realm_folder,
+        realm_principal=realm_principal,
+        identity=identity
     )
 
 
-def get_vault_status(network: str = "staging", realm_folder: str = ".") -> str:
+def get_vault_status(network: str = "staging", realm_folder: str = ".", realm_principal: str = "", identity: str = "") -> str:
     """Get vault status and statistics."""
     return _run_extension_call(
         extension="vault",
         function="get_status",
         args={},
         network=network,
-        realm_folder=realm_folder
+        realm_folder=realm_folder,
+        realm_principal=realm_principal,
+        identity=identity
     )
 
 

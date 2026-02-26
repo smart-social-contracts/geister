@@ -1,7 +1,7 @@
 Find a realm you like
 Join the realm
 Set your avatar
-Use db_get with entity_type Invoice to list your pending invoices
+Use find_objects with class_name Invoice to list your pending invoices
 Use pay_invoice for each pending invoice (pass invoice_id, amount, and the vault canister ID as recipient)
 Vote on proposals
 Create a proposal
