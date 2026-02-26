@@ -859,7 +859,7 @@ def update_agent_telos_progress(agent_id: str, current_step: int, step_result: D
                         step_results = step_results || %s,
                         updated_at = NOW()
                     WHERE agent_id = %s RETURNING *
-                """, (current_step, json.dumps({str(current_step): step_result}), agent_id))
+                """, (current_step, json.dumps(step_result), agent_id))
             else:
                 cursor.execute("""
                     UPDATE agent_telos SET current_step = %s, updated_at = NOW()

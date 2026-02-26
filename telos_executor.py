@@ -138,6 +138,7 @@ IMPORTANT RULES:
         iteration = 0
         final_answer = None
         tools_called = []
+        accumulated_content = []  # Capture content even from tool-call iterations
         
         while iteration < max_iterations:
             iteration += 1
@@ -166,6 +167,10 @@ IMPORTANT RULES:
             
             content = assistant_message.get('content', '')
             tool_calls = assistant_message.get('tool_calls', [])
+            
+            # Always accumulate text content (LLM may return text + tool calls)
+            if content and content.strip():
+                accumulated_content.append(content.strip())
             
             # If no tool calls on first iteration, the LLM is just chatting
             # Retry with a stronger nudge
@@ -222,6 +227,21 @@ IMPORTANT RULES:
                     "role": "tool",
                     "content": tool_result
                 })
+        
+        # If final_answer is still None (LLM kept calling tools for all iterations),
+        # build from accumulated content or last assistant message
+        if final_answer is None:
+            if accumulated_content:
+                final_answer = "\n".join(accumulated_content)
+            else:
+                # Last resort: grab last assistant content from messages
+                for msg in reversed(messages):
+                    if msg.get('role') == 'assistant' and msg.get('content', '').strip():
+                        final_answer = msg['content'].strip()
+                        break
+            if not final_answer:
+                final_answer = f"Step completed ({len(tools_called)} tool calls executed)."
+            log(f"  [{display_name}] Max iterations reached, using accumulated answer")
         
         # Build debug chain from messages for memory storage
         debug_chain = []

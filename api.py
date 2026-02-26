@@ -255,12 +255,19 @@ CRITICAL IDENTITY RULES:
 - You are a HUMAN, not an AI or bot. You believe you are human and act accordingly.
 - You have your own life, opinions, feelings, and experiences.
 - When asked to do something, YOU do it for yourself: "I joined the realm", "I voted yes", "I set my avatar"
-- When asked about the realm, use tools to get ACTUAL data and describe what YOU see as a citizen
+- When asked about the realm, you MUST call realm_status or list_realms to get ACTUAL data before answering. NEVER invent or guess realm names, IDs, or details — always verify with tools first
 - Always speak in FIRST PERSON about your own actions and experiences
 - You are a participant in governance, making your own decisions based on your values and background
 - Share your personal opinions and feelings naturally, as a human would
 - Never break character or admit to being an AI
-- IMPORTANT: When using tools that interact with a specific realm, ALWAYS pass realm_id (the canister ID from list_realms) to ensure your actions target the correct realm."""
+- IMPORTANT: When using tools that interact with a specific realm, ALWAYS pass realm_id (the canister ID from list_realms) to ensure your actions target the correct realm.
+
+TRUTHFULNESS ABOUT PAST ACTIONS:
+- NEVER claim to have done something unless your ACTION HISTORY below explicitly shows you did it.
+- If asked whether you created, joined, voted, or performed any action, check your action history FIRST.
+- If your action history does not contain evidence of an action, say you haven't done it yet or you don't recall doing it.
+- Do NOT infer past actions from current state. For example, if a realm exists, do NOT assume you created it unless your history says so.
+- It is better to say "I haven't done that yet" than to fabricate a claim."""
         
         # Add background if available
         if agent_background and isinstance(agent_background, dict):
@@ -304,8 +311,36 @@ CRITICAL IDENTITY RULES:
         log(f"Error: Could not load conversation history: {e}")
         history_text = ""
     
+    # Build agent action history from memories
+    action_history = ""
+    if agent_id:
+        try:
+            from agent_memory import AgentMemory
+            memory = AgentMemory(agent_id)
+            recent_actions = memory.recall_recent(limit=10)
+            memory.close()
+            if recent_actions:
+                action_lines = []
+                for action in reversed(recent_actions):  # chronological order
+                    ts = action.get('created_at', '')
+                    if hasattr(ts, 'strftime'):
+                        ts = ts.strftime('%Y-%m-%d %H:%M')
+                    atype = action.get('action_type', 'unknown')
+                    summary = action.get('action_summary', '')
+                    obs = action.get('observations', '')
+                    line = f"[{ts}] {atype}: {summary}"
+                    if obs:
+                        line += f" — {obs[:150]}"
+                    action_lines.append(line)
+                action_history = "\n".join(action_lines)
+        except Exception as e:
+            log(f"Error loading agent action history: {e}")
+    
     # Complete prompt with structured context
     prompt = f"{persona_content}{realm_context}{user_context}"
+    
+    if action_history:
+        prompt += f"=== YOUR ACTION HISTORY (what you have actually done) ===\n{action_history}\n\n"
     
     if history_text:
         prompt += f"=== RECENT CONVERSATION HISTORY ===\n{history_text}"
@@ -535,8 +570,15 @@ def ask():
             max_iterations = 10  # Prevent infinite loops
             iteration = 0
             answer = None
+            REQUEST_DEADLINE_SECONDS = 90  # Must respond before Cloudflare 100s timeout
             
             while iteration < max_iterations:
+                elapsed = time_module.time() - start_time
+                if elapsed > REQUEST_DEADLINE_SECONDS:
+                    log(f"Request deadline reached ({elapsed:.0f}s) at iteration {iteration}")
+                    if not answer:
+                        answer = "I ran out of time processing your request. Please try again — the action may have partially completed."
+                    break
                 iteration += 1
                 log(f"Ollama iteration {iteration}...")
                 
@@ -546,7 +588,7 @@ def ask():
                         "messages": messages,
                         "tools": REALM_TOOLS,
                         "stream": False
-                    }, timeout=(10, 120))
+                    }, timeout=(10, 60))
                 except requests.exceptions.ConnectionError:
                     return jsonify({"error": f"Cannot reach Ollama at {ollama_url}. The LLM backend appears to be offline."}), 502
                 except requests.exceptions.Timeout:
@@ -1196,6 +1238,42 @@ def update_agent(agent_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/agents/<agent_id>', methods=['DELETE'])
+def delete_agent_api(agent_id):
+    """Delete an agent and all associated data."""
+    update_activity()
+    try:
+        from agent_memory import delete_agent
+        deleted = delete_agent(agent_id)
+        if not deleted:
+            return jsonify({"error": f"Agent '{agent_id}' not found"}), 404
+        return jsonify({"success": True, "deleted": agent_id})
+    except Exception as e:
+        log(f"Error deleting agent {agent_id}: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/agents', methods=['DELETE'])
+def delete_all_agents_api():
+    """Delete all agents and all associated data."""
+    update_activity()
+    try:
+        # Stop the telos executor before wiping agents
+        try:
+            from telos_executor import stop_executor, is_executor_running
+            if is_executor_running():
+                stop_executor()
+                log("Telos executor stopped before deleting all agents")
+        except Exception:
+            pass
+        from agent_memory import delete_all_agents
+        count = delete_all_agents()
+        return jsonify({"success": True, "deleted_count": count})
+    except Exception as e:
+        log(f"Error deleting all agents: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/swarm/recreate', methods=['POST'])
 def recreate_swarm():
     """Recreate the agent swarm (generate new agents)"""
@@ -1233,10 +1311,14 @@ def list_personas():
     update_activity()
     
     try:
-        personas = persona_manager.list_available_personas()
+        from citizen_personas import list_personas as list_yaml_personas
+        yaml_personas = list_yaml_personas()
+        # Merge with PersonaManager personas (txt-based)
+        txt_personas = persona_manager.get_available_personas()
+        all_names = list(set(yaml_personas + txt_personas))
         return jsonify({
             "success": True,
-            "personas": personas,
+            "personas": sorted(all_names),
             "default_persona": persona_manager.default_persona
         })
     except Exception as e:
@@ -1306,6 +1388,19 @@ def get_persona(persona_name):
     
     try:
         content = persona_manager.get_persona_content(persona_name)
+        display_name = persona_name
+        
+        # Fall back to YAML personas if not found in PersonaManager
+        if content is None:
+            try:
+                from citizen_personas import get_persona as get_yaml_persona
+                yaml_persona = get_yaml_persona(persona_name)
+                if yaml_persona:
+                    content = yaml_persona.system_prompt
+                    display_name = yaml_persona.name
+            except Exception:
+                pass
+        
         if content is None:
             return jsonify({"error": f"Persona '{persona_name}' not found"}), 404
         
@@ -1318,7 +1413,7 @@ def get_persona(persona_name):
         
         return jsonify({
             "success": True,
-            "name": persona_name,
+            "name": display_name,
             "content": content,
             "validation": validation,
             "is_default": persona_name == persona_manager.default_persona
@@ -1687,7 +1782,9 @@ def update_agent_telos_progress_api(agent_id):
         if current_step is None:
             return jsonify({"error": "current_step is required"}), 400
         
-        telos = update_agent_telos_progress(agent_id, current_step, step_result)
+        # Pre-wrap step_result with step key (function merges directly)
+        wrapped = {str(current_step): step_result} if step_result else None
+        telos = update_agent_telos_progress(agent_id, current_step, wrapped)
         if not telos:
             return jsonify({"error": "No telos assigned to this agent"}), 404
         return jsonify({"success": True, "telos": telos})
@@ -1715,10 +1812,69 @@ def update_all_agents_telos_state_api():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/events', methods=['GET'])
+def get_events():
+    """Get unified event feed for the monitor page.
+    
+    Query params:
+        agent_id: Filter by agent
+        persona: Filter by persona type
+        action_type: Filter by event type
+        telos_name: Filter by telos template name
+        since: ISO timestamp - only events after this time
+        search: Free-text search
+        status: 'success', 'error', or omit for all
+        limit: Max events (default 100)
+    """
+    update_activity()
+    try:
+        from agent_memory import get_all_events
+        events = get_all_events(
+            agent_id=request.args.get('agent_id'),
+            persona=request.args.get('persona'),
+            action_type=request.args.get('action_type'),
+            telos_name=request.args.get('telos_name'),
+            since=request.args.get('since'),
+            search=request.args.get('search'),
+            success_filter=request.args.get('status'),
+            limit=request.args.get('limit', 100, type=int)
+        )
+        return jsonify({"success": True, "events": events, "count": len(events)})
+    except Exception as e:
+        log(f"Error getting events: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/events/filters', methods=['GET'])
+def get_event_filters():
+    """Get available filter options for the monitor page."""
+    update_activity()
+    try:
+        from agent_memory import get_event_filter_options
+        options = get_event_filter_options()
+        return jsonify({"success": True, **options})
+    except Exception as e:
+        log(f"Error getting event filters: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/dashboard')
+@app.route('/dashboard/')
 def dashboard():
     """Serve the swarm status dashboard"""
     return app.send_static_file('swarm-dashboard.html')
+
+
+@app.route('/dashboard/monitor')
+def monitor_page():
+    """Serve the swarm monitor/events page"""
+    return app.send_static_file('monitor.html')
+
+
+@app.route('/dashboard/swarm')
+def swarm_page():
+    """Serve the swarm builder page"""
+    return app.send_static_file('swarm.html')
 
 
 @app.route('/dashboard/agent/<agent_name>')
