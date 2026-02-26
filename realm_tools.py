@@ -92,7 +92,8 @@ def _run_extension_call(
     network: str = "staging",
     realm_folder: str = ".",
     timeout: int = 60,
-    identity: str = ""
+    identity: str = "",
+    realm_principal: str = ""
 ) -> str:
     """
     Run an extension sync call with JSON output.
@@ -121,7 +122,8 @@ def _run_extension_call(
         network=network,
         realm_folder=realm_folder,
         timeout=timeout,
-        identity=identity
+        identity=identity,
+        realm_principal=realm_principal
     )
 
 
@@ -474,7 +476,7 @@ def realm_status(network: str = "staging", realm_folder: str = ".", realm_princi
     # Enrich status with vote tallies (canister status doesn't include them)
     try:
         status_data = json.loads(status_raw) if isinstance(status_raw, str) else status_raw
-        proposals_raw = get_proposals(network=network, realm_folder=realm_folder, identity=identity)
+        proposals_raw = get_proposals(network=network, realm_folder=realm_folder, identity=identity, realm_principal=realm_principal)
         proposals_data = json.loads(proposals_raw) if isinstance(proposals_raw, str) else proposals_raw
         resp = proposals_data.get("response", proposals_data)
         if isinstance(resp, str):
@@ -587,7 +589,7 @@ def find_objects(class_name: str, params: list = None, network: str = "staging",
 # Governance / Voting Tools
 # =============================================================================
 
-def get_proposals(status: Optional[str] = None, network: str = "staging", realm_folder: str = ".", identity: str = "") -> str:
+def get_proposals(status: Optional[str] = None, network: str = "staging", realm_folder: str = ".", identity: str = "", realm_principal: str = "") -> str:
     """Get governance proposals from the realm."""
     args = {"status": status} if status else {}
     return _run_extension_call(
@@ -596,7 +598,8 @@ def get_proposals(status: Optional[str] = None, network: str = "staging", realm_
         args=args,
         network=network,
         realm_folder=realm_folder,
-        identity=identity
+        identity=identity,
+        realm_principal=realm_principal
     )
 
 
