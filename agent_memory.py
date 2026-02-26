@@ -530,66 +530,56 @@ except:
     pass
 
 
-def _seed_default_telos_template():
-    """Seed the default Citizen Onboarding template if it doesn't exist."""
+TELOS_TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "telos_templates")
+
+
+def _load_steps_from_file(filename: str) -> List[str]:
+    """Load telos steps from a text file (one step per line)."""
+    filepath = os.path.join(TELOS_TEMPLATES_DIR, filename)
+    with open(filepath, "r") as f:
+        return [line.strip() for line in f if line.strip()]
+
+
+def _seed_telos_template(name: str, description: str, filename: str, is_default: bool = False):
+    """Seed or update a telos template from a text file."""
+    steps = _load_steps_from_file(filename)
     conn = None
     try:
         conn = _get_db_connection()
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            # Check if default template exists
-            cursor.execute("SELECT id FROM telos_templates WHERE name = 'Citizen Onboarding'")
-            if cursor.fetchone() is None:
-                # Create the default template
-                steps = [
-                    'Find a realm you like',
-                    'Join the realm',
-                    'Set your avatar',
-                    'Use db_get with entity_type Invoice to list your pending invoices',
-                    'Use pay_invoice for each pending invoice (pass invoice_id, amount, and the vault canister ID as recipient)',
-                    'Vote on proposals',
-                    'Create a proposal'
-                ]
+            cursor.execute("SELECT id, steps FROM telos_templates WHERE name = %s", (name,))
+            existing = cursor.fetchone()
+            if existing is None:
                 cursor.execute("""
                     INSERT INTO telos_templates (name, description, steps, is_default)
-                    VALUES (%s, %s, %s, TRUE)
-                """, ('Citizen Onboarding', 'Steps for new citizens to get started', json.dumps(steps)))
-                conn.commit()
-    except Exception:
-        pass  # Template may already exist or DB not ready
-    finally:
-        if conn:
-            conn.close()
-
-def _seed_founder_telos_template():
-    """Seed the Realm Founder template if it doesn't exist."""
-    conn = None
-    try:
-        conn = _get_db_connection()
-        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute("SELECT id FROM telos_templates WHERE name = 'Realm Founder'")
-            if cursor.fetchone() is None:
-                steps = [
-                    'Use registry_redeem_voucher to redeem voucher code BETA50 with your principal to get credits',
-                    'Use registry_get_credits to check your credit balance and confirm you have at least 5 credits',
-                    'Use registry_deploy_realm to deploy a new realm with a creative name',
-                    'Use registry_deploy_status with wait=true to wait for deployment to complete',
-                    'Join the newly created realm as admin using join_realm with profile=admin'
-                ]
+                    VALUES (%s, %s, %s, %s)
+                """, (name, description, json.dumps(steps), is_default))
+            elif json.loads(existing['steps']) != steps:
                 cursor.execute("""
-                    INSERT INTO telos_templates (name, description, steps)
-                    VALUES (%s, %s, %s)
-                """, ('Realm Founder', 'Redeem credits, deploy a new realm, and join it as admin', json.dumps(steps)))
-                conn.commit()
+                    UPDATE telos_templates SET steps = %s, updated_at = NOW()
+                    WHERE id = %s
+                """, (json.dumps(steps), existing['id']))
+            conn.commit()
     except Exception:
         pass
     finally:
         if conn:
             conn.close()
 
+
 # Seed templates on module load
 try:
-    _seed_default_telos_template()
-    _seed_founder_telos_template()
+    _seed_telos_template(
+        "Citizen Onboarding",
+        "Steps for new citizens to get started",
+        "citizen_onboarding.txt",
+        is_default=True,
+    )
+    _seed_telos_template(
+        "Realm Founder",
+        "Redeem credits, deploy a new realm, and join it as admin",
+        "realm_founder.txt",
+    )
 except:
     pass
 

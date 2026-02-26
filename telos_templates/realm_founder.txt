@@ -1,0 +1,5 @@
+Use registry_redeem_voucher to redeem voucher code BETA50 with your principal to get credits
+Use registry_get_credits to check your credit balance and confirm you have at least 5 credits
+Use registry_deploy_realm to deploy a new realm with a creative name
+Use registry_deploy_status with wait=true to wait for deployment to complete
+Join the newly created realm as admin using join_realm with profile=admin
