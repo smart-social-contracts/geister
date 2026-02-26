@@ -159,7 +159,7 @@ IMPORTANT RULES:
         ]
         
         # Call Ollama with tools
-        max_iterations = 5
+        max_iterations = 8
         iteration = 0
         final_answer = None
         tools_called = []
@@ -257,28 +257,38 @@ IMPORTANT RULES:
         # make one final call WITHOUT tools to force a text summary
         if final_answer is None:
             log(f"  [{display_name}] Max iterations reached, requesting summary...")
-            messages.append({
-                "role": "user",
-                "content": "Summarise what you just did and what happened. Be specific about the actions taken and any results or errors. Do NOT call any more tools."
-            })
-            try:
-                summary_resp = requests.post(f"{OLLAMA_URL}/api/chat", json={
-                    "model": DEFAULT_MODEL,
-                    "messages": messages,
-                    "stream": False
-                    # No tools — forces text response
-                }, timeout=(10, 60))
-                if summary_resp.status_code == 200:
-                    summary_msg = summary_resp.json().get('message', {})
-                    summary_text = summary_msg.get('content', '').strip()
-                    if summary_text:
-                        final_answer = summary_text
-                        messages.append(summary_msg)
-            except Exception as summary_err:
-                log(f"  [{display_name}] Summary request failed: {summary_err}")
+            summary_prompts = [
+                "Summarise what you just did and what happened. List the tools you called, their results, and any errors. Do NOT call any more tools — respond with plain text only.",
+                "RESPOND WITH TEXT ONLY. No tool calls. Summarise the actions and results from above."
+            ]
+            for attempt, prompt in enumerate(summary_prompts):
+                if final_answer:
+                    break
+                messages.append({"role": "user", "content": prompt})
+                try:
+                    summary_resp = requests.post(f"{OLLAMA_URL}/api/chat", json={
+                        "model": DEFAULT_MODEL,
+                        "messages": messages,
+                        "stream": False
+                        # No tools key — forces text response
+                    }, timeout=(10, 60))
+                    if summary_resp.status_code == 200:
+                        summary_msg = summary_resp.json().get('message', {})
+                        summary_text = (summary_msg.get('content') or '').strip()
+                        has_tool_calls = bool(summary_msg.get('tool_calls'))
+                        log(f"  [{display_name}] Summary attempt {attempt+1}: "
+                            f"text={len(summary_text)} chars, tool_calls={has_tool_calls}")
+                        if summary_text:
+                            final_answer = summary_text
+                            messages.append(summary_msg)
+                    else:
+                        log(f"  [{display_name}] Summary attempt {attempt+1}: HTTP {summary_resp.status_code}")
+                except Exception as summary_err:
+                    log(f"  [{display_name}] Summary attempt {attempt+1} failed: {summary_err}")
 
-            # Fallback if summary call also failed
+            # Fallback if summary calls also failed
             if not final_answer:
+                log(f"  [{display_name}] All summary attempts failed, using fallback")
                 if accumulated_content:
                     final_answer = "\n".join(accumulated_content)
                 else:
