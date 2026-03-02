@@ -48,10 +48,14 @@
                     <p class="text-sm text-primary-400" id="version-info">Loading...</p>
                 </div>
                 <div class="flex gap-2">
-                    <button onclick="openSwarmModal()" class="bg-primary-700 hover:bg-primary-600 text-white px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 justify-center">
+                    <a href="/dashboard/swarm" class="bg-primary-700 hover:bg-primary-600 text-white px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 justify-center">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
                         Swarm
-                    </button>
+                    </a>
+                    <a href="/dashboard/monitor" class="bg-primary-700 hover:bg-primary-600 text-white px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 justify-center">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                        Monitor
+                    </a>
                     <button onclick="refreshAll()" class="bg-primary-600 hover:bg-primary-500 text-white px-4 py-2 rounded font-medium transition-colors flex items-center gap-2 justify-center">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                         Refresh
@@ -132,6 +136,9 @@
                     </button>
                     <button onclick="openTelosTemplatesModal()" class="px-4 py-2 rounded bg-primary-200 hover:bg-primary-300 text-primary-700 text-sm font-medium">
                         📋 Templates
+                    </button>
+                    <button onclick="deleteAllAgents()" class="px-4 py-2 rounded bg-red-600 hover:bg-red-700 text-white text-sm font-medium">
+                        🗑 Delete All
                     </button>
                 </div>
             </div>
@@ -263,36 +270,6 @@
         </div>
     </div>
 
-    <!-- Swarm Management Modal -->
-    <div id="swarm-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
-        <div class="bg-white rounded-lg w-full max-w-md p-6 shadow-xl">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-bold text-primary-900">Swarm Management</h2>
-                <button onclick="closeSwarmModal()" class="text-primary-400 hover:text-primary-600 text-2xl">&times;</button>
-            </div>
-            
-            <div class="space-y-4">
-                <div>
-                    <label class="text-sm text-primary-500">Number of Agents</label>
-                    <input type="number" id="swarm-count" value="5" min="1" max="50" class="w-full bg-primary-50 border border-primary-200 rounded px-3 py-2 mt-1 text-primary-900">
-                </div>
-                <div>
-                    <label class="text-sm text-primary-500">Start Index</label>
-                    <input type="number" id="swarm-start" value="1" min="1" class="w-full bg-primary-50 border border-primary-200 rounded px-3 py-2 mt-1 text-primary-900">
-                </div>
-                <div>
-                    <label class="text-sm text-primary-500">Persona</label>
-                    <select id="swarm-persona" class="w-full bg-primary-50 border border-primary-200 rounded px-3 py-2 mt-1 text-primary-900">
-                        <option value="">Loading personas...</option>
-                    </select>
-                </div>
-                
-                <button onclick="recreateSwarm()" class="w-full bg-primary-800 hover:bg-primary-700 text-white px-4 py-3 rounded font-medium">Generate Agents</button>
-                
-                <div id="swarm-result" class="hidden text-sm p-3 rounded"></div>
-            </div>
-        </div>
-    </div>
 
     <!-- Telos Templates Modal -->
     <div id="telos-templates-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4">
@@ -376,10 +353,10 @@
         let agentsCache = [];
         let filteredAgents = [];
         let currentPage = 1;
-        const PAGE_SIZE = 5;
+        const PAGE_SIZE = 100;
 
-        const personaEmoji = { 'compliant': '🐑', 'watchful': '🦊', 'exploiter': '🦅', 'founder': '🏗️', 'unknown': '❓' };
-        const personaColors = { 'compliant': 'bg-green-100 text-green-700', 'watchful': 'bg-yellow-100 text-yellow-700', 'exploiter': 'bg-red-100 text-red-700', 'founder': 'bg-blue-100 text-blue-700', 'unknown': 'bg-primary-100 text-primary-700' };
+        const personaEmoji = { 'compliant': '🐑', 'watchful': '🦊', 'exploiter': '🦅', 'founder': '🏗️', 'ashoka': '🏛️', 'unknown': '❓' };
+        const personaColors = { 'compliant': 'bg-green-100 text-green-700', 'watchful': 'bg-yellow-100 text-yellow-700', 'exploiter': 'bg-red-100 text-red-700', 'founder': 'bg-blue-100 text-blue-700', 'ashoka': 'bg-indigo-100 text-indigo-700', 'unknown': 'bg-primary-100 text-primary-700' };
 
         function showError(msg) {
             document.getElementById('error-banner').classList.remove('hidden');
@@ -510,8 +487,9 @@
                     </td>
                     <td class="px-4 py-3 text-primary-700">${a.total_sessions || 0}</td>
                     <td class="px-4 py-3 text-primary-500">${formatDate(a.last_active_at)}</td>
-                    <td class="px-4 py-3">
+                    <td class="px-4 py-3 flex items-center gap-3">
                         <a href="/dashboard/agent/${encodeURIComponent(a.agent_id)}" class="text-primary-600 hover:text-primary-800 font-medium">View</a>
+                        <button onclick="event.stopPropagation(); deleteAgent('${a.agent_id}')" class="text-red-500 hover:text-red-700 font-medium">Delete</button>
                     </td>
                 </tr>`;
             }).join('');
@@ -530,9 +508,10 @@
                             ${telosState ? `<span class="inline-flex items-center ${telosStateColors[telosState]} px-2 py-0.5 rounded text-xs capitalize">${telosState}</span>` : ''}
                         </div>
                     </div>
-                    <div class="flex justify-between text-sm text-primary-500">
+                    <div class="flex justify-between items-center text-sm text-primary-500">
                         <span>${a.total_sessions || 0} sessions</span>
                         <span>${formatDate(a.last_active_at)}</span>
+                        <button onclick="event.preventDefault(); event.stopPropagation(); deleteAgent('${a.agent_id}')" class="text-red-500 hover:text-red-700 font-medium text-xs">Delete</button>
                     </div>
                 </a>`;
             }).join('');
@@ -697,66 +676,6 @@
             }
         }
 
-        // Swarm Modal
-        async function fetchPersonasForDropdown() {
-            const select = document.getElementById('swarm-persona');
-            try {
-                const res = await fetch(`${API_BASE}/api/personas/all`);
-                const data = await res.json();
-                if (data.success && data.personas) {
-                    select.innerHTML = '';
-                    data.personas.forEach(p => {
-                        const opt = document.createElement('option');
-                        opt.value = p.id;
-                        opt.textContent = `${p.emoji} ${p.name} (${p.type})`;
-                        select.appendChild(opt);
-                    });
-                }
-            } catch (e) {
-                console.error('Error fetching personas:', e);
-                select.innerHTML = '<option value="compliant">Compliant</option>';
-            }
-        }
-
-        function openSwarmModal() {
-            document.getElementById('swarm-modal').classList.remove('hidden');
-            document.getElementById('swarm-result').classList.add('hidden');
-            fetchPersonasForDropdown();
-        }
-        function closeSwarmModal() {
-            document.getElementById('swarm-modal').classList.add('hidden');
-        }
-
-        async function recreateSwarm() {
-            const count = parseInt(document.getElementById('swarm-count').value) || 5;
-            const start = parseInt(document.getElementById('swarm-start').value) || 1;
-            const persona = document.getElementById('swarm-persona').value;
-            
-            try {
-                const res = await fetch(`${API_BASE}/api/swarm/recreate`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ count, start_index: start, persona })
-                });
-                const data = await res.json();
-                const result = document.getElementById('swarm-result');
-                result.classList.remove('hidden', 'bg-red-900/50', 'bg-green-900/50');
-                if (data.success) {
-                    result.classList.add('bg-green-900/50');
-                    result.textContent = data.message;
-                    setTimeout(() => { fetchAgents(); }, 3000);
-                } else {
-                    result.classList.add('bg-red-900/50');
-                    result.textContent = 'Error: ' + (data.error || 'Unknown error');
-                }
-            } catch (e) {
-                const result = document.getElementById('swarm-result');
-                result.classList.remove('hidden', 'bg-green-900/50');
-                result.classList.add('bg-red-900/50');
-                result.textContent = 'Error: ' + e.message;
-            }
-        }
-
         // Bulk Telos State Control
         async function setAllAgentsState(state) {
             if (!confirm(`Set all agents to ${state}?`)) return;
@@ -770,6 +689,45 @@
                 const data = await res.json();
                 if (!data.success) throw new Error(data.error);
                 alert(`Updated ${data.updated_count} agents to ${state}`);
+                fetchAgents();
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        function clearChatHistory(agentId) {
+            try { localStorage.removeItem(`geister_chat_${agentId}`); } catch(e) {}
+        }
+
+        function clearAllChatHistory() {
+            try {
+                const keys = Object.keys(localStorage).filter(k => k.startsWith('geister_chat_'));
+                keys.forEach(k => localStorage.removeItem(k));
+            } catch(e) {}
+        }
+
+        async function deleteAgent(agentId) {
+            if (!confirm(`Delete agent "${agentId}" and all its data?`)) return;
+            try {
+                const res = await fetch(`${API_BASE}/api/agents/${agentId}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                clearChatHistory(agentId);
+                fetchAgents();
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function deleteAllAgents() {
+            if (!confirm('DELETE ALL AGENTS? This cannot be undone!')) return;
+            if (!confirm('Are you really sure? All agent data will be permanently lost.')) return;
+            try {
+                const res = await fetch(`${API_BASE}/api/agents`, { method: 'DELETE' });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+                clearAllChatHistory();
+                alert(`Deleted ${data.deleted_count} agents`);
                 fetchAgents();
             } catch (e) {
                 alert('Error: ' + e.message);

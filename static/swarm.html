@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Swarm Builder - Geister Swarm</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': {
+                            50: '#FAFAFA',
+                            100: '#F5F5F5',
+                            200: '#E5E5E5',
+                            300: '#D4D4D4',
+                            400: '#A3A3A3',
+                            500: '#737373',
+                            600: '#525252',
+                            700: '#404040',
+                            800: '#262626',
+                            900: '#171717'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Helvetica Neue', 'Helvetica', 'Arial', 'ui-sans-serif', 'system-ui', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .batch-row { transition: all 0.2s ease; }
+        .batch-row:hover { background: #FAFAFA; }
+        .status-log { max-height: 300px; overflow-y: auto; }
+    </style>
+</head>
+<body class="bg-white text-primary-900 min-h-screen font-sans">
+    <!-- Header -->
+    <header class="bg-primary-900 border-b border-primary-800">
+        <div class="max-w-5xl mx-auto px-4 py-4 sm:px-6">
+            <div class="flex items-center gap-4">
+                <a href="/dashboard" class="text-primary-400 hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                </a>
+                <div class="flex-1">
+                    <h1 class="text-xl sm:text-2xl font-bold text-white">Swarm Builder</h1>
+                    <p class="text-sm text-primary-400">Create agents in bulk across multiple personas</p>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-5xl mx-auto px-4 py-6 sm:px-6">
+        <!-- Batch Builder -->
+        <div class="bg-primary-50 border border-primary-200 rounded-lg p-6 mb-6">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-primary-900">Agent Batches</h2>
+                <button onclick="addBatch()" class="bg-primary-800 hover:bg-primary-700 text-white px-4 py-2 rounded font-medium text-sm flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
+                    Add Batch
+                </button>
+            </div>
+
+            <!-- Column Headers -->
+            <div class="hidden sm:grid sm:grid-cols-[1fr_120px_40px] gap-3 mb-2 px-1 text-sm text-primary-500 font-medium">
+                <div>Persona</div>
+                <div>Count</div>
+                <div></div>
+            </div>
+
+            <!-- Batch Rows -->
+            <div id="batch-list" class="space-y-3">
+                <!-- Rows inserted by JS -->
+            </div>
+
+            <!-- Quick-add presets -->
+            <div class="mt-4 pt-4 border-t border-primary-200">
+                <p class="text-sm text-primary-500 mb-2">Quick presets:</p>
+                <div class="flex flex-wrap gap-2" id="preset-buttons">
+                    <!-- Populated by JS after personas load -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Summary -->
+        <div class="bg-primary-50 border border-primary-200 rounded-lg p-6 mb-6">
+            <h2 class="text-lg font-semibold text-primary-900 mb-3">Summary</h2>
+            <div id="summary" class="space-y-2 text-sm text-primary-700">
+                <p class="text-primary-400">No batches configured yet.</p>
+            </div>
+            <div class="mt-4 flex items-center gap-4">
+                <span class="text-primary-500 text-sm">Total agents: <span id="total-count" class="font-bold text-primary-900">0</span></span>
+            </div>
+        </div>
+
+        <!-- Generate Button -->
+        <div class="mb-6">
+            <button onclick="generateAll()" id="generate-btn" class="w-full bg-primary-800 hover:bg-primary-700 text-white px-6 py-4 rounded-lg font-medium text-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                Generate Agents
+            </button>
+        </div>
+
+        <!-- Status Log -->
+        <div id="log-section" class="hidden bg-primary-50 border border-primary-200 rounded-lg p-6">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-lg font-semibold text-primary-900">Progress</h2>
+                <button onclick="clearLog()" class="text-sm text-primary-500 hover:text-primary-700">Clear</button>
+            </div>
+            <div id="status-log" class="status-log space-y-2 font-mono text-sm"></div>
+        </div>
+    </main>
+
+    <footer class="text-center text-primary-400 text-sm py-6 border-t border-primary-200 space-y-1">
+        <p><a href="https://github.com/smart-social-contracts/geister" target="_blank" class="hover:text-primary-600">&#xf09b;</a></p>
+        <p id="footer-version">Geister</p>
+        <p>&#x267E;&#xFE0F; Built on the Internet Computer</p>
+    </footer>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let personas = [];
+        let batchIdCounter = 0;
+        let nextStartIndex = 1;
+        let generating = false;
+
+        // =====================================================================
+        // Persona loading
+        // =====================================================================
+
+        async function loadPersonas() {
+            try {
+                const res = await fetch(`${API_BASE}/api/personas/all`);
+                const data = await res.json();
+                if (data.success && data.personas) {
+                    personas = data.personas;
+                    renderPresets();
+                }
+            } catch (e) {
+                console.error('Error fetching personas:', e);
+                personas = [{ id: 'compliant', name: 'Compliant', emoji: '🐑', type: 'citizen' }];
+            }
+        }
+
+        function personaOptions(selectedId) {
+            const types = ['citizen', 'admin', 'assistant'];
+            const typeLabels = { citizen: 'Citizens', admin: 'Admins', assistant: 'Assistants' };
+            let html = '';
+            for (const t of types) {
+                const group = personas.filter(p => p.type === t);
+                if (group.length === 0) continue;
+                html += `<optgroup label="${typeLabels[t] || t}">`;
+                group.forEach(p => {
+                    html += `<option value="${p.id}" ${p.id === selectedId ? 'selected' : ''}>${p.emoji} ${p.name}</option>`;
+                });
+                html += '</optgroup>';
+            }
+            return html;
+        }
+
+        // =====================================================================
+        // Detect next start index from existing agents
+        // =====================================================================
+
+        async function detectNextIndex() {
+            try {
+                const res = await fetch(`${API_BASE}/api/agents`);
+                const data = await res.json();
+                if (data.success && data.agents) {
+                    let maxIdx = 0;
+                    data.agents.forEach(a => {
+                        const m = (a.agent_id || '').match(/_(\d+)$/);
+                        if (m) maxIdx = Math.max(maxIdx, parseInt(m[1]));
+                    });
+                    nextStartIndex = maxIdx + 1;
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        // =====================================================================
+        // Batch management
+        // =====================================================================
+
+        function addBatch(personaId, count) {
+            personaId = personaId || (personas.length ? personas[0].id : 'compliant');
+            if (count === undefined || count === null) {
+                const p = personas.find(pp => pp.id === personaId);
+                count = p ? defaultCount(p.type) : 5;
+            }
+
+            batchIdCounter++;
+            const id = batchIdCounter;
+
+            const row = document.createElement('div');
+            row.className = 'batch-row bg-white border border-primary-200 rounded-lg p-4 sm:p-3';
+            row.id = `batch-${id}`;
+            row.innerHTML = `
+                <div class="grid grid-cols-1 sm:grid-cols-[1fr_120px_40px] gap-3 items-end">
+                    <div>
+                        <label class="sm:hidden text-xs text-primary-500 mb-1 block">Persona</label>
+                        <select data-field="persona" class="w-full bg-primary-50 border border-primary-200 rounded px-3 py-2 text-primary-900" onchange="updateSummary()">
+                            ${personaOptions(personaId)}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="sm:hidden text-xs text-primary-500 mb-1 block">Count</label>
+                        <input type="number" data-field="count" value="${count}" min="1" max="100" class="w-full bg-primary-50 border border-primary-200 rounded px-3 py-2 text-primary-900" oninput="updateSummary()">
+                    </div>
+                    <div class="flex items-center justify-end sm:justify-center">
+                        <button onclick="removeBatch(${id})" class="text-red-400 hover:text-red-600 p-1" title="Remove batch">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('batch-list').appendChild(row);
+            updateSummary();
+        }
+
+        function removeBatch(id) {
+            const el = document.getElementById(`batch-${id}`);
+            if (el) el.remove();
+            updateSummary();
+        }
+
+        function getBatches() {
+            const rows = document.querySelectorAll('#batch-list .batch-row');
+            return Array.from(rows).map(row => ({
+                persona: row.querySelector('[data-field="persona"]').value,
+                count: parseInt(row.querySelector('[data-field="count"]').value) || 0
+            })).filter(b => b.count > 0);
+        }
+
+        // =====================================================================
+        // Summary
+        // =====================================================================
+
+        function updateSummary() {
+            const batches = getBatches();
+            const summaryEl = document.getElementById('summary');
+            const totalEl = document.getElementById('total-count');
+
+            if (batches.length === 0) {
+                summaryEl.innerHTML = '<p class="text-primary-400">No batches configured yet.</p>';
+                totalEl.textContent = '0';
+                return;
+            }
+
+            let total = 0;
+            const lines = batches.map(b => {
+                const p = personas.find(pp => pp.id === b.persona);
+                const label = p ? `${p.emoji} ${p.name}` : b.persona;
+                total += b.count;
+                return `<div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-primary-400 inline-block"></span>
+                    <span><strong>${b.count}</strong> × ${label}</span>
+                </div>`;
+            });
+
+            summaryEl.innerHTML = lines.join('');
+            totalEl.textContent = total;
+        }
+
+        // =====================================================================
+        // Quick presets
+        // =====================================================================
+
+        function defaultCount(type) {
+            return (type === 'assistant' || type === 'admin') ? 1 : 5;
+        }
+
+        function renderPresets() {
+            const container = document.getElementById('preset-buttons');
+            const types = ['citizen', 'admin', 'assistant'];
+            const typeLabels = { citizen: 'Citizens', admin: 'Admins', assistant: 'Assistants' };
+            let html = '';
+            for (const t of types) {
+                const group = personas.filter(p => p.type === t);
+                if (group.length === 0) continue;
+                html += `<div class="w-full"><p class="text-xs text-primary-400 uppercase tracking-wide mb-1 mt-2">${typeLabels[t] || t}</p><div class="flex flex-wrap gap-2">`;
+                group.forEach(p => {
+                    const cnt = defaultCount(p.type);
+                    html += `<button onclick="addBatch('${p.id}', ${cnt})" class="bg-white border border-primary-200 hover:bg-primary-100 text-primary-700 px-3 py-1.5 rounded text-sm flex items-center gap-1">
+                        ${p.emoji} +${cnt} ${p.name}
+                    </button>`;
+                });
+                html += '</div></div>';
+            }
+            container.innerHTML = html;
+        }
+
+        // =====================================================================
+        // Generation
+        // =====================================================================
+
+        function logMsg(text, type) {
+            const section = document.getElementById('log-section');
+            section.classList.remove('hidden');
+            const log = document.getElementById('status-log');
+            const colors = { info: 'text-primary-700', success: 'text-green-700', error: 'text-red-700', pending: 'text-primary-400' };
+            const icons = { info: 'ℹ️', success: '✅', error: '❌', pending: '⏳' };
+            const div = document.createElement('div');
+            div.className = colors[type] || 'text-primary-700';
+            div.innerHTML = `<span>${icons[type] || ''}</span> <span>${new Date().toLocaleTimeString()}</span> — ${text}`;
+            log.appendChild(div);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('status-log').innerHTML = '';
+            document.getElementById('log-section').classList.add('hidden');
+        }
+
+        async function generateAll() {
+            const batches = getBatches();
+            if (batches.length === 0) {
+                alert('Add at least one batch first.');
+                return;
+            }
+
+            generating = true;
+            const btn = document.getElementById('generate-btn');
+            btn.disabled = true;
+            btn.textContent = 'Generating...';
+
+            const total = batches.reduce((s, b) => s + b.count, 0);
+            logMsg(`Starting generation of <strong>${total}</strong> agents across <strong>${batches.length}</strong> batch(es)`, 'info');
+
+            // Re-detect the latest next index right before generating
+            await detectNextIndex();
+            let runningIndex = nextStartIndex;
+
+            for (let i = 0; i < batches.length; i++) {
+                const b = batches[i];
+                const startIdx = runningIndex;
+                runningIndex += b.count;
+                const p = personas.find(pp => pp.id === b.persona);
+                const label = p ? `${p.emoji} ${p.name}` : b.persona;
+
+                logMsg(`Batch ${i + 1}/${batches.length}: <strong>${b.count}</strong> × ${label} (index ${startIdx}–${startIdx + b.count - 1})...`, 'pending');
+
+                try {
+                    const res = await fetch(`${API_BASE}/api/swarm/recreate`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ count: b.count, start_index: startIdx, persona: b.persona })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        logMsg(`Batch ${i + 1}: ${data.message}`, 'success');
+                    } else {
+                        logMsg(`Batch ${i + 1}: Error — ${data.error || 'Unknown error'}`, 'error');
+                    }
+                } catch (e) {
+                    logMsg(`Batch ${i + 1}: Network error — ${e.message}`, 'error');
+                }
+            }
+
+            logMsg('All batches submitted. Agents will appear on the dashboard as they are created.', 'info');
+
+            btn.disabled = false;
+            btn.textContent = 'Generate Agents';
+            generating = false;
+        }
+
+        // =====================================================================
+        // Footer version
+        // =====================================================================
+
+        async function loadVersion() {
+            try {
+                const res = await fetch(`${API_BASE}/`);
+                const data = await res.json();
+                const version = data.version || 'unknown';
+                const commit = data.git_commit ? ` (${data.git_commit})` : '';
+                const commitDatetime = data.git_commit_datetime || '';
+                const footer = `Geister ${version}${commit}${commitDatetime ? ' - ' + commitDatetime : ''}`;
+                document.getElementById('footer-version').textContent = footer;
+            } catch (e) { /* ignore */ }
+        }
+
+        // =====================================================================
+        // Init
+        // =====================================================================
+
+        async function init() {
+            await Promise.all([loadPersonas(), detectNextIndex(), loadVersion()]);
+            // Start with one default batch
+            addBatch('compliant', 5);
+        }
+
+        init();
+    </script>
+</body>
+</html>
