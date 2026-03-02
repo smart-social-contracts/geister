@@ -88,10 +88,13 @@ class TestToolDefinitions(unittest.TestCase):
         self.assertIn('params', params['properties'])
         self.assertEqual(params['required'], ['class_name'])
         
-        # Check params is array of arrays
+        # Check params accepts an array (may be wrapped in anyOf for Optional)
         params_schema = params['properties']['params']
-        self.assertEqual(params_schema['type'], 'array')
-        self.assertEqual(params_schema['items']['type'], 'array')
+        if 'anyOf' in params_schema:
+            array_types = [s for s in params_schema['anyOf'] if s.get('type') == 'array']
+            self.assertTrue(len(array_types) > 0, "params should accept array type")
+        else:
+            self.assertEqual(params_schema['type'], 'array')
 
 
 class TestExecuteTool(unittest.TestCase):

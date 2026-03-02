@@ -145,6 +145,69 @@ geister
 └── version             # Show version
 ```
 
+## MCP Server (AI Tool Integration)
+
+Geister exposes its 26 realm tools via the [Model Context Protocol](https://modelcontextprotocol.io/) (MCP), allowing any compatible AI client to interact with Realms governance.
+
+### Public Endpoint
+
+```
+https://geister-mcp.realmsgos.dev/mcp
+```
+
+### Connect from Windsurf
+
+Open **Cmd/Ctrl+Shift+P → "Open MCP Configuration"** and add:
+
+```json
+{
+  "mcpServers": {
+    "realms-governance": {
+      "serverUrl": "https://geister-mcp.realmsgos.dev/mcp"
+    }
+  }
+}
+```
+
+### Connect from Claude Desktop
+
+Edit `~/.claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "realms-governance": {
+      "url": "https://geister-mcp.realmsgos.dev/mcp"
+    }
+  }
+}
+```
+
+### Connect from Cursor
+
+In Settings → MCP, add a server with URL: `https://geister-mcp.realmsgos.dev/mcp`
+
+### Run Locally
+
+```bash
+# HTTP server (remote access)
+python mcp_server.py --transport http --port 8090
+
+# stdio (local IDE integration)
+python mcp_server.py --transport stdio
+```
+
+### Available Tools (26)
+
+| Category | Tools |
+|----------|-------|
+| Registry | `list_realms`, `search_realm`, `registry_get_credits`, `registry_redeem_voucher`, `registry_deploy_realm`, `registry_deploy_status` |
+| Citizen | `join_realm`, `set_profile_picture`, `get_my_status`, `get_my_principal` |
+| Realm Status | `realm_status`, `db_schema`, `db_get`, `find_objects` |
+| Governance | `get_proposals`, `get_proposal`, `cast_vote`, `get_my_vote`, `submit_proposal` |
+| Economic | `get_balance`, `get_transactions`, `get_vault_status` |
+| ICW Tokens | `icw_check_balance`, `icw_transfer_tokens`, `pay_invoice`, `icw_get_address` |
+
 ## Environment Variables
 
 | Variable | Description | Default |
@@ -153,5 +216,8 @@ geister
 | `GEISTER_OLLAMA_URL` | Ollama endpoint | `https://geister-ollama.realmsgos.dev` |
 | `OLLAMA_HOST` | Local Ollama | `http://localhost:11434` |
 | `DB_PASS` | Database password | - |
+| `MCP_TRANSPORT` | MCP transport (`http` or `stdio`) | `http` |
+| `MCP_HOST` | MCP server bind host | `0.0.0.0` |
+| `MCP_PORT` | MCP server port | `8090` |
 
 Run `geister status` to see current configuration.

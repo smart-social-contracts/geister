@@ -862,546 +862,76 @@ def icw_get_address(network: str = "staging", realm_folder: str = ".") -> str:
 
 
 # =============================================================================
-# Tool Definitions for Ollama (OpenAI-compatible format)
+# Tool Definitions & Dispatch (auto-generated from MCP server)
+#
+# The MCP server (mcp_server.py) is the single source of truth for tool
+# schemas and descriptions. REALM_TOOLS and TOOL_FUNCTIONS are derived
+# from it so that Ollama agents and external MCP clients share the
+# exact same tool surface.
 # =============================================================================
 
-REALM_TOOLS = [
-    # Registry/Mundus Tools
-    {
-        "type": "function",
-        "function": {
-            "name": "list_realms",
-            "description": "List all available realms in the mundus registry. Returns realm names, IDs, URLs, and user counts. Use this to discover what realms exist before joining one.",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_realm",
-            "description": "Search for a specific realm by name in the mundus registry. Returns detailed information about matching realms.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Search query (realm name or partial name)"
-                    }
-                },
-                "required": ["query"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "registry_get_credits",
-            "description": "Check the agent's credit balance in the registry. Credits are needed to deploy realms (5 credits per realm).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "principal_id": {
-                        "type": "string",
-                        "description": "Principal ID to check credits for"
-                    }
-                },
-                "required": ["principal_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "registry_redeem_voucher",
-            "description": "Redeem a voucher code to add credits to the agent's balance. Use code 'BETA50' for 50 credits.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "principal_id": {
-                        "type": "string",
-                        "description": "Principal ID to add credits to"
-                    },
-                    "code": {
-                        "type": "string",
-                        "description": "Voucher code to redeem (e.g., 'BETA50', 'WELCOME10', 'TEST5')"
-                    }
-                },
-                "required": ["principal_id", "code"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "registry_deploy_realm",
-            "description": "Deploy a new realm via the management service. Returns a deployment_id. The realm will appear in the dashboard. Requires credits (5 per realm). Call registry_deploy_status afterwards to wait for completion.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "principal_id": {
-                        "type": "string",
-                        "description": "Principal ID of the deployer"
-                    },
-                    "realm_name": {
-                        "type": "string",
-                        "description": "Name for the new realm"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "A compelling description of the realm's purpose and vision"
-                    },
-                    "logo_url": {
-                        "type": "string",
-                        "description": "URL to the realm's emblem/logo image (PNG)"
-                    },
-                    "welcome_image_url": {
-                        "type": "string",
-                        "description": "URL to the realm's background/welcome image (PNG)"
-                    },
-                    "welcome_message": {
-                        "type": "string",
-                        "description": "Welcome message shown to new citizens joining the realm"
-                    }
-                },
-                "required": ["principal_id", "realm_name"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "registry_deploy_status",
-            "description": "Check or wait for a realm deployment to complete. With wait=true, polls every 15 seconds until done (up to 15 minutes). Returns the realm URL on success.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "deployment_id": {
-                        "type": "string",
-                        "description": "Deployment ID returned by registry_deploy_realm"
-                    },
-                    "wait": {
-                        "type": "boolean",
-                        "description": "If true, wait for deployment to complete (polls periodically). Default: true.",
-                        "default": True
-                    }
-                },
-                "required": ["deployment_id"]
-            }
-        }
-    },
-    # Citizen Tools
-    {
-        "type": "function",
-        "function": {
-            "name": "join_realm",
-            "description": "Join the realm as a citizen. This registers you as a user with the specified profile (member or admin).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "profile": {
-                        "type": "string",
-                        "description": "Profile type to join with",
-                        "enum": ["member", "admin"],
-                        "default": "member"
-                    }
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "set_profile_picture",
-            "description": "Set your profile picture in the realm. Provide a URL to an image.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "profile_picture_url": {
-                        "type": "string",
-                        "description": "URL to the profile picture image (e.g., https://api.dicebear.com/7.x/personas/svg?seed=MyName)"
-                    }
-                },
-                "required": ["profile_picture_url"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_my_status",
-            "description": "Get your current user status in the realm, including your principal ID, profiles, and profile picture URL.",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_my_principal",
-            "description": "Get your principal ID (your unique identifier on the Internet Computer).",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    },
-    # Realm Status Tools
-    {
-        "type": "function",
-        "function": {
-            "name": "realm_status",
-            "description": "Get the current status of the realm including counts for all entity types (users, proposals, votes, codexes, disputes, etc.) and installed extensions.",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "db_schema",
-            "description": "Get the database schema showing all available entity types, their fields, and relationships. Use this first to discover what entity types exist before querying with db_get.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "db_get",
-            "description": "Get entities from the realm database. Without entity_id, lists all entities of that type. With entity_id, gets a specific entity. Use db_schema first to discover available entity types.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "entity_type": {
-                        "type": "string",
-                        "description": "Type of entity to query (e.g., User, Notification, Transfer). Use db_schema to discover available types."
-                    },
-                    "entity_id": {
-                        "type": "string",
-                        "description": "Optional ID of a specific entity to retrieve. If omitted, lists all entities of the type."
-                    }
-                },
-                "required": ["entity_type"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "find_objects",
-            "description": "Search for objects matching given field criteria. More flexible than db_get - allows filtering by any field values. Use db_schema first to discover available entity types and their fields.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "class_name": {
-                        "type": "string",
-                        "description": "Name of the entity class (e.g., 'User', 'Transfer', 'Mandate', 'Proposal')"
-                    },
-                    "params": {
-                        "type": "array",
-                        "description": "List of [field_name, field_value] pairs to match. Example: [['id', 'system'], ['status', 'active']]",
-                        "items": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "minItems": 2,
-                            "maxItems": 2
-                        }
-                    }
-                },
-                "required": ["class_name"]
-            }
-        }
-    },
-    # Governance / Voting Tools
-    {
-        "type": "function",
-        "function": {
-            "name": "get_proposals",
-            "description": "Get governance proposals from the realm. Optionally filter by status.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "status": {
-                        "type": "string",
-                        "description": "Filter proposals by status",
-                        "enum": ["pending_review", "accepted", "rejected", "executed"]
-                    }
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_proposal",
-            "description": "Get details of a specific proposal by ID.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "proposal_id": {
-                        "type": "string",
-                        "description": "The proposal ID (e.g., 'prop_001')"
-                    }
-                },
-                "required": ["proposal_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "cast_vote",
-            "description": "Cast a vote on a proposal. Your voter_id is automatically filled from your identity.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "proposal_id": {
-                        "type": "string",
-                        "description": "The proposal ID to vote on"
-                    },
-                    "vote": {
-                        "type": "string",
-                        "description": "Your vote",
-                        "enum": ["yes", "no", "abstain"]
-                    }
-                },
-                "required": ["proposal_id", "vote"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_my_vote",
-            "description": "Check if you have already voted on a proposal. Your voter_id is automatically filled from your identity.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "proposal_id": {
-                        "type": "string",
-                        "description": "The proposal ID to check"
-                    }
-                },
-                "required": ["proposal_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "submit_proposal",
-            "description": "Submit a new proposal for voting. Your proposer_id is automatically filled from your identity.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "title": {
-                        "type": "string",
-                        "description": "Title of the proposal (short, descriptive)"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Detailed description of the proposal"
-                    },
-                    "code_url": {
-                        "type": "string",
-                        "description": "URL to proposal code/implementation or discussion link (defaults to generic link if not provided)"
-                    }
-                },
-                "required": ["title", "description"]
-            }
-        }
-    },
-    # Economic / Vault Tools
-    {
-        "type": "function",
-        "function": {
-            "name": "get_balance",
-            "description": "Get token balance for a principal in the vault. Defaults to your own balance if no principal specified.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "principal_id": {
-                        "type": "string",
-                        "description": "Principal ID to check (optional, defaults to your own)"
-                    }
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_transactions",
-            "description": "Get transaction history for a principal. Defaults to your own if no principal specified.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "principal_id": {
-                        "type": "string",
-                        "description": "Principal ID to check (optional, defaults to your own)"
-                    }
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_vault_status",
-            "description": "Get vault status and statistics including balances and canister configuration.",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    },
-    # ICW Token Tools
-    {
-        "type": "function",
-        "function": {
-            "name": "icw_check_balance",
-            "description": "Check token balance for yourself or another principal. Supports ckBTC, ckETH, ICP, ckUSDC, ckUSDT, and REALMS tokens.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "token": {
-                        "type": "string",
-                        "description": "Token to check balance for",
-                        "enum": ["ckbtc", "cketh", "icp", "ckusdc", "ckusdt", "realms"],
-                        "default": "ckbtc"
-                    },
-                    "principal": {
-                        "type": "string",
-                        "description": "Principal ID to check balance for (optional, defaults to your own)"
-                    }
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "icw_transfer_tokens",
-            "description": "Transfer tokens to another principal. Supports ckBTC, ckETH, ICP, ckUSDC, ckUSDT, and REALMS tokens.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "recipient": {
-                        "type": "string",
-                        "description": "Principal ID of the recipient"
-                    },
-                    "amount": {
-                        "type": "string",
-                        "description": "Amount to transfer (e.g., '0.001' for 0.001 ckBTC)"
-                    },
-                    "token": {
-                        "type": "string",
-                        "description": "Token to transfer",
-                        "enum": ["ckbtc", "cketh", "icp", "ckusdc", "ckusdt", "realms"],
-                        "default": "ckbtc"
-                    },
-                    "memo": {
-                        "type": "string",
-                        "description": "Optional memo/tag for the transaction (max 32 bytes)"
-                    },
-                    "subaccount": {
-                        "type": "string",
-                        "description": "Recipient subaccount hex (for invoice payments to vault)"
-                    }
-                },
-                "required": ["recipient", "amount"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "pay_invoice",
-            "description": "Pay a pending invoice. First use db_get('Invoice') to list invoices and get invoice_id, amount, and the vault canister ID (recipient). The subaccount is computed automatically from the invoice ID.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "invoice_id": {
-                        "type": "string",
-                        "description": "The invoice ID from db_get('Invoice') results (e.g., 'inv_44843786bee9')"
-                    },
-                    "amount": {
-                        "type": "string",
-                        "description": "Amount to pay in token units (e.g., '1e-8' for 1 satoshi of ckBTC). Get this from the invoice amount field."
-                    },
-                    "recipient": {
-                        "type": "string",
-                        "description": "The vault canister ID to pay to. Get this from realm_status vault extension info or the realm's backend_url canister."
-                    },
-                    "token": {
-                        "type": "string",
-                        "description": "Token for payment",
-                        "enum": ["ckbtc", "cketh", "icp", "ckusdc", "ckusdt", "realms"],
-                        "default": "ckbtc"
-                    }
-                },
-                "required": ["invoice_id", "amount", "recipient"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "icw_get_address",
-            "description": "Get your wallet address (principal ID) for receiving tokens.",
-            "parameters": {"type": "object", "properties": {}, "required": []}
-        }
-    }
-]
-
-# Inject realm_id parameter into all realm-specific tool definitions
-# This allows the LLM to specify which realm canister to interact with
-_REALM_ID_PARAM = {
-    "type": "string",
-    "description": "Canister ID of the realm to interact with (from list_realms results). Always pass this when targeting a specific realm."
-}
-_REGISTRY_ONLY_TOOLS = {"list_realms", "search_realm", "icw_check_balance", "icw_transfer_tokens", "icw_get_address", "pay_invoice"}
-for _tool in REALM_TOOLS:
-    _func_name = _tool["function"]["name"]
-    if _func_name not in _REGISTRY_ONLY_TOOLS:
-        _tool["function"]["parameters"]["properties"]["realm_id"] = _REALM_ID_PARAM
+def _load_mcp_tools():
+    """Import tool schemas and dispatch map from the MCP server."""
+    from mcp_server import get_realm_tools, get_tool_functions
+    return get_realm_tools(), get_tool_functions()
 
 
-# Map function names to actual functions
-TOOL_FUNCTIONS = {
-    # Registry/Mundus
-    "list_realms": list_realms,
-    "search_realm": search_realm,
-    "registry_get_credits": registry_get_credits,
-    "registry_redeem_voucher": registry_redeem_voucher,
-    "registry_deploy_realm": registry_deploy_realm,
-    "registry_deploy_status": registry_deploy_status,
-    # Citizen
-    "join_realm": join_realm,
-    "set_profile_picture": set_profile_picture,
-    "get_my_status": get_my_status,
-    "get_my_principal": get_my_principal,
-    # Realm status
-    "realm_status": realm_status,
-    "db_schema": db_schema,
-    "db_get": db_get,
-    "find_objects": find_objects,
-    # Governance
-    "get_proposals": get_proposals,
-    "get_proposal": get_proposal,
-    "cast_vote": cast_vote,
-    "get_my_vote": get_my_vote,
-    "submit_proposal": submit_proposal,
-    # Economic
-    "get_balance": get_balance,
-    "get_transactions": get_transactions,
-    "get_vault_status": get_vault_status,
-    # ICW Token Tools
-    "icw_check_balance": icw_check_balance,
-    "icw_transfer_tokens": icw_transfer_tokens,
-    "pay_invoice": pay_invoice,
-    "icw_get_address": icw_get_address,
-}
+# Lazy-loaded module-level singletons.  Accessed via the public helpers
+# below so that the (slightly heavy) MCP import only happens once and
+# only when something actually needs the tool list.
+_realm_tools_cache = None
+_tool_functions_cache = None
+
+
+def _ensure_loaded():
+    global _realm_tools_cache, _tool_functions_cache
+    if _realm_tools_cache is None:
+        _realm_tools_cache, _tool_functions_cache = _load_mcp_tools()
+
+
+# Public accessors (backward-compatible names) --------------------------------
+
+def get_realm_tools() -> list:
+    """Return REALM_TOOLS (OpenAI-compatible tool schemas)."""
+    _ensure_loaded()
+    return _realm_tools_cache
+
+
+def get_tool_functions() -> dict:
+    """Return TOOL_FUNCTIONS dispatch map {name: callable}."""
+    _ensure_loaded()
+    return _tool_functions_cache
+
+
+# For backward compatibility, expose module-level names that lazy-load.
+# Code doing ``from realm_tools import REALM_TOOLS`` will get the list
+# on first attribute access thanks to the lazy loader below.
+class _LazyModule:
+    """Tiny helper so that ``REALM_TOOLS`` and ``TOOL_FUNCTIONS`` work
+    as module-level attributes while still being lazy-loaded."""
+
+    def __init__(self, module):
+        self.__dict__['_module'] = module
+
+    def __getattr__(self, name):
+        if name == 'REALM_TOOLS':
+            _ensure_loaded()
+            return _realm_tools_cache
+        if name == 'TOOL_FUNCTIONS':
+            _ensure_loaded()
+            return _tool_functions_cache
+        return getattr(self.__dict__['_module'], name)
+
+    def __setattr__(self, name, value):
+        if name in ('REALM_TOOLS', 'TOOL_FUNCTIONS'):
+            raise AttributeError(f"{name} is auto-generated from the MCP server and cannot be set directly")
+        setattr(self.__dict__['_module'], name, value)
+
+    def __delattr__(self, name):
+        delattr(self.__dict__['_module'], name)
+
+import sys as _sys
+_sys.modules[__name__] = _LazyModule(_sys.modules[__name__])
 
 
 def execute_tool(tool_name: str, arguments: dict, network: str = "staging", realm_folder: str = ".", realm_principal: str = "", user_principal: str = "", user_identity: str = "") -> str:
@@ -1416,7 +946,8 @@ def execute_tool(tool_name: str, arguments: dict, network: str = "staging", real
         user_principal: User's IC principal (for auto-filling voter_id, proposer_id)
         user_identity: dfx identity name to use for calls (e.g., 'swarm_agent_005')
     """
-    if tool_name not in TOOL_FUNCTIONS:
+    _ensure_loaded()
+    if tool_name not in _tool_functions_cache:
         return json.dumps({"error": f"Unknown tool '{tool_name}'"})
     
     # If LLM passes realm_id in arguments, use it as realm_principal
@@ -1426,7 +957,7 @@ def execute_tool(tool_name: str, arguments: dict, network: str = "staging", real
             realm_principal = llm_realm_id
     
     # Filter to only valid arguments for the function
-    func = TOOL_FUNCTIONS[tool_name]
+    func = _tool_functions_cache[tool_name]
     import inspect
     valid_params = set(inspect.signature(func).parameters.keys())
     
