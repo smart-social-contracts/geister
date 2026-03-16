@@ -1,7 +1,10 @@
 Find a realm you like
 Join the realm
 Set your avatar
-Use find_objects with class_name Invoice to list your pending invoices
-Use pay_invoice for each pending invoice (pass invoice_id, amount, and the vault canister ID as recipient)
-Vote on proposals
-Create a proposal
+Use get_my_invoices to list your pending invoices (automatically filtered to your identity)
+For each pending invoice:
+  a. Get the deposit address: call member_dashboard extension get_invoice_deposit_address with invoice_id
+  b. Send ckBTC to the vault canister at the invoice's subaccount
+  c. Verify payment: call vault extension refresh_invoice with invoice_id
+Vote on proposals (call voting extension cast_vote with proposal_id and vote choice)
+Create a proposal (call voting extension submit_proposal with title, description, and code_url)
