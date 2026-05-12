@@ -97,28 +97,32 @@ def registry_redeem_voucher(
 
 @mcp.tool
 def registry_deploy_realm(
-    principal_id: Annotated[str, "Principal ID of the deployer"],
     realm_name: Annotated[str, "Name for the new realm"],
     description: Annotated[str, "A compelling description of the realm's purpose and vision"] = "",
-    logo_url: Annotated[str, "URL to the realm's emblem/logo image (PNG)"] = "",
-    welcome_image_url: Annotated[str, "URL to the realm's background/welcome image (PNG)"] = "",
+    logo_url: Annotated[str, "Unused in queue deploy (reserved)"] = "",
+    welcome_image_url: Annotated[str, "Unused in queue deploy (reserved)"] = "",
     welcome_message: Annotated[str, "Welcome message shown to new citizens joining the realm"] = "",
+    network: Annotated[str, "IC network, e.g. staging or demo"] = "staging",
 ) -> str:
-    """Deploy a new realm via the management service. Returns a deployment_id. The realm will appear in the dashboard. Requires credits (5 per realm). Call registry_deploy_status afterwards to wait for completion."""
+    """Enqueue realm deployment via realm_registry_backend.request_deployment (dfx + credits). Returns job_id; call registry_deploy_status next."""
     return _registry_deploy_realm(
-        principal_id=principal_id, realm_name=realm_name,
-        description=description, logo_url=logo_url,
-        welcome_image_url=welcome_image_url, welcome_message=welcome_message,
+        realm_name=realm_name,
+        description=description,
+        logo_url=logo_url,
+        welcome_image_url=welcome_image_url,
+        welcome_message=welcome_message,
+        network=network,
     )
 
 
 @mcp.tool
 def registry_deploy_status(
-    deployment_id: Annotated[str, "Deployment ID returned by registry_deploy_realm"],
+    job_id: Annotated[str, "job_id returned by registry_deploy_realm"],
     wait: Annotated[bool, "If true, wait for deployment to complete (polls periodically). Default: true."] = True,
+    network: Annotated[str, "IC network"] = "staging",
 ) -> str:
-    """Check or wait for a realm deployment to complete. With wait=true, polls every 15 seconds until done (up to 15 minutes). Returns the realm URL on success."""
-    return _registry_deploy_status(deployment_id=deployment_id, wait=wait)
+    """Poll realm_installer for job status. With wait=true, polls until completed or failed (up to 15 minutes)."""
+    return _registry_deploy_status(job_id=job_id, wait=wait, network=network)
 
 
 # =============================================================================

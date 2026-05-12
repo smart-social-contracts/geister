@@ -333,106 +333,179 @@ def registry_redeem_voucher(
         return json.dumps({"error": str(e)})
 
 
+_REGISTRY_QUEUE_IDS = {
+    "staging": "7wzxh-wyaaa-aaaau-aggyq-cai",
+    "demo": "rhw4p-gqaaa-aaaac-qbw7q-cai",
+}
+_INSTALLER_QUEUE_IDS = {
+    "staging": "lusjm-wqaaa-aaaau-ago7q-cai",
+    "demo": "2s4td-daaaa-aaaao-bazmq-cai",
+}
+
+
+def _dfx_call_text(
+    canister_id: str,
+    method: str,
+    candid_arg: str,
+    network: str,
+    *,
+    output_json: bool = False,
+) -> str:
+    import os
+    import subprocess
+
+    env = os.environ.copy()
+    env["DFX_WARNING"] = "-mainnet_plaintext_identity"
+    env["NO_COLOR"] = "1"
+    env.setdefault("TERM", "dumb")
+    cmd = [
+        "dfx",
+        "canister",
+        "call",
+        canister_id,
+        method,
+        candid_arg,
+        "--network",
+        network,
+    ]
+    if output_json:
+        cmd.extend(["--output", "json"])
+    r = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+    )
+    if r.returncode != 0:
+        raise RuntimeError((r.stderr or r.stdout or "dfx failed").strip())
+
+
+def _parse_dfx_text(stdout: str) -> dict:
+    import json
+
+    s = (stdout or "").strip()
+    if s.startswith("("):
+        s = s.strip("()").strip()
+    if s.startswith('"') and s.endswith('"'):
+        s = s[1:-1].replace('\\"', '"').replace("\\n", "\n")
+    return json.loads(s)
+
+
 def registry_deploy_realm(
-    principal_id: str,
     realm_name: str,
     description: str = "",
     logo_url: str = "",
     welcome_image_url: str = "",
     welcome_message: str = "",
-    management_url: str = "https://management.realmsgos.dev",
     network: str = "staging",
     realm_folder: str = ".",
 ) -> str:
-    """Deploy a new realm via the management service. Returns a deployment_id for status polling."""
-    try:
-        realm_config = {
+    """Enqueue deployment via realm_registry_backend.request_deployment (requires dfx + identity)."""
+    _ = (realm_folder, logo_url, welcome_image_url)
+
+    registry_id = _REGISTRY_QUEUE_IDS.get(network)
+    if not registry_id:
+        return json.dumps({"error": f"No built-in registry id for network {network}"})
+
+    manifest = {
+        "realm": {
             "name": realm_name,
-            "descriptions": {"en": description or f"Realm created by agent: {realm_name}"},
-            "languages": ["en"],
-            "welcome_messages": {"en": welcome_message or f"Welcome to {realm_name}!"},
-            "token_enabled": True,
-            "token_name": realm_name,
-            "token_symbol": realm_name[:4].upper(),
-            "extensions": [],
-        }
-        if logo_url:
-            realm_config["logo_url"] = logo_url
-        if welcome_image_url:
-            realm_config["welcome_image_url"] = welcome_image_url
-        resp = requests.post(
-            f"{management_url}/api/deploy",
-            json={
-                "principal_id": principal_id,
-                "realm_config": realm_config,
-            },
-            timeout=120
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            api_success = data.get("success", True)
-            result = {
-                "success": api_success,
-                "deployment_id": data.get("deployment_id"),
+            "display_name": realm_name,
+            "description": description or f"Realm: {realm_name}",
+            "welcome_message": welcome_message or f"Welcome to {realm_name}!",
+            "branding": {"logo": "emblem.png", "welcome_image": "background.png"},
+            "codex": {"package": "syntropia", "version": "latest"},
+            "extensions": ["all"],
+        },
+        "network": network,
+    }
+    candid_arg = f'("{json.dumps(manifest)}")'
+
+    try:
+        out = _dfx_call_text(registry_id, "request_deployment", candid_arg, network)
+        data = _parse_dfx_text(out)
+        if not data.get("success"):
+            return json.dumps(
+                {"success": False, "error": data.get("error", "request_deployment failed")}
+            )
+        job_id = data.get("job_id")
+        return json.dumps(
+            {
+                "success": True,
+                "job_id": job_id,
+                "message": "Queued. Use registry_deploy_status with this job_id.",
             }
-            if api_success:
-                result["message"] = "Deployment started. Use registry_deploy_status to poll for completion."
-            else:
-                result["error"] = data.get("error") or data.get("message") or "Deploy failed"
-                result["message"] = data.get("message", "Deploy request failed")
-            return json.dumps(result)
-        else:
-            return json.dumps({"error": f"HTTP {resp.status_code}: {resp.text[:200]}"})
+        )
+    except FileNotFoundError:
+        return json.dumps({"error": "dfx not found on PATH"})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
 
 def registry_deploy_status(
-    deployment_id: str,
-    management_url: str = "https://management.realmsgos.dev",
+    job_id: str,
     wait: bool = True,
     network: str = "staging",
     realm_folder: str = ".",
 ) -> str:
-    """Check deployment status. With wait=True, polls until completed or failed (up to 15 min)."""
+    """Poll realm_installer.get_deployment_job_status for job_id."""
+    _ = realm_folder
     import time
-    max_wait = 900  # 15 minutes
+
+    installer_id = _INSTALLER_QUEUE_IDS.get(network)
+    if not installer_id:
+        return json.dumps({"error": f"No built-in installer id for network {network}"})
+
+    max_wait = 900
     poll_interval = 15
-    start_time = time.time()
-    
+    start = time.time()
+
     try:
         while True:
-            resp = requests.get(
-                f"{management_url}/api/deploy/{deployment_id}",
-                timeout=30
+            out = _dfx_call_text(
+                installer_id,
+                "get_deployment_job_status",
+                f'("{job_id}")',
+                network,
+                output_json=True,
             )
-            if resp.status_code != 200:
-                return json.dumps({"error": f"HTTP {resp.status_code}: {resp.text[:200]}"})
-            
-            data = resp.json()
+            j = json.loads((out or "").strip())
+            if j.get("Err"):
+                return json.dumps(
+                    {"error": (j.get("Err") or {}).get("message", "status query failed")}
+                )
+            data = j.get("Ok") or j
+            if not isinstance(data, dict):
+                return json.dumps({"error": "unexpected installer response"})
+
             status = data.get("status", "unknown")
-        
+            fe = data.get("frontend_canister_id") or ""
             result_data = {
                 "status": status,
-                "deployment_id": deployment_id,
+                "job_id": job_id,
+                "realm_name": data.get("realm_name"),
             }
-            if data.get("realm_url"):
-                result_data["realm_url"] = data["realm_url"]
-            if data.get("realm_id"):
-                result_data["realm_id"] = data["realm_id"]
+            if fe:
+                result_data["realm_url"] = f"https://{fe}.icp0.io"
             if data.get("error"):
-                result_data["error"] = data["error"][:200]
-            
-            # If not waiting or deployment finished, return immediately
-            if not wait or status in ("completed", "failed"):
+                result_data["error"] = str(data["error"])[:200]
+
+            if not wait or status in (
+                "completed",
+                "failed",
+                "failed_verification",
+                "cancelled",
+            ):
                 return json.dumps(result_data)
-            
-            # Check timeout
-            if time.time() - start_time > max_wait:
+
+            if time.time() - start > max_wait:
                 result_data["warning"] = "Polling timed out after 15 minutes"
                 return json.dumps(result_data)
-            
+
             time.sleep(poll_interval)
+    except FileNotFoundError:
+        return json.dumps({"error": "dfx not found on PATH"})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
