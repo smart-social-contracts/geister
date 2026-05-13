@@ -608,7 +608,7 @@ def agent_inspect(
             console.print("\n[dim]No profile found[/dim]")
         
         # Memories
-        memories = memory.get_memories(limit=10)
+        memories = memory.recall_recent(limit=10)
         if memories:
             console.print(f"\n[bold cyan]Recent Memories ({len(memories)}):[/bold cyan]")
             for mem in memories:
@@ -756,7 +756,7 @@ def pod_restart_api(
 @pod_app.command("logs")
 def pod_logs(
     pod_type: str = typer.Argument("main", help="Pod type (main or branch)"),
-    log_type: str = typer.Option("api", "--type", "-t", help="Log type: api, ollama, chromadb, or all"),
+    log_type: str = typer.Option("api", "--type", "-t", help="Log type: api, ollama, or all"),
     lines: int = typer.Option(100, "--lines", "-n", help="Number of lines to show"),
     api_url: Optional[str] = typer.Option(None, "--api-url", "-u", help="Geister API URL (uses default if not set)"),
 ):

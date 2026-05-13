@@ -27,10 +27,8 @@ dependencies = [
 dev = ["ruff>=0.4", "black>=24.0"]
 server = ["flask>=2.0.0", "flask-cors>=4.0.0"]
 full = [
-    "ic-py",
     "runpod>=1.6.0",
     "realms-gos>=0.2.1",
-    "numpy>=1.24.0",
 ]
 
 [project.scripts]
@@ -49,7 +47,7 @@ py-modules = [
     "pod_manager",
     "realm_tools",
     "citizen_personas",
-    "persona_manager",
+    "ollama_client",
     "agent_memory",
     "api",
 ]

@@ -31,6 +31,7 @@ from typing import Optional
 from citizen_personas import get_persona, list_personas, CitizenPersona
 from realm_tools import REALM_TOOLS, execute_tool
 from agent_memory import AgentMemory, DatabaseConnectionError
+from ollama_client import call_ollama_with_tools
 
 
 # Default configuration
@@ -48,87 +49,6 @@ def log(message: str):
 def get_ollama_url() -> str:
     """Get Ollama URL, handling trailing slashes"""
     return DEFAULT_OLLAMA_HOST.rstrip('/')
-
-
-def call_ollama_with_tools(
-    ollama_url: str,
-    model: str,
-    messages: list,
-    tools: list,
-    network: str,
-    realm_folder: str,
-    max_tool_rounds: int = 10,
-    tool_history: list = None
-) -> str:
-    """Call Ollama with tool support, handling tool calls iteratively."""
-    current_messages = messages.copy()
-    if tool_history is None:
-        tool_history = []
-    
-    for round_num in range(max_tool_rounds):
-        log(f"\n{'='*60}")
-        log(f"Round {round_num + 1}: Sending to Ollama...")
-        
-        try:
-            response = requests.post(
-                f"{ollama_url}/api/chat",
-                json={
-                    "model": model,
-                    "messages": current_messages,
-                    "tools": tools,
-                    "stream": False
-                },
-                timeout=120
-            )
-            response.raise_for_status()
-            result = response.json()
-        except requests.exceptions.RequestException as e:
-            log(f"Error calling Ollama: {e}")
-            return f"Error: Failed to communicate with Ollama - {e}"
-        
-        assistant_message = result.get('message', {})
-        current_messages.append(assistant_message)
-        
-        tool_calls = assistant_message.get('tool_calls', [])
-        
-        if not tool_calls:
-            final_response = assistant_message.get('content', '')
-            log(f"\nFinal response from LLM:\n{final_response}")
-            return final_response
-        
-        log(f"\nTool calls requested: {len(tool_calls)}")
-        
-        for tool_call in tool_calls:
-            tool_name = tool_call['function']['name']
-            tool_args = tool_call['function'].get('arguments', {})
-            
-            log(f"\n  Executing tool: {tool_name}")
-            log(f"  Arguments: {json.dumps(tool_args, indent=2)}")
-            
-            tool_result = execute_tool(
-                tool_name,
-                tool_args,
-                network=network,
-                realm_folder=realm_folder
-            )
-            
-            display_result = tool_result[:500] + "..." if len(tool_result) > 500 else tool_result
-            log(f"  Result: {display_result}")
-            
-            # Track tool call for memory
-            tool_history.append({
-                "tool": tool_name,
-                "args": tool_args,
-                "result_preview": display_result[:200]
-            })
-            
-            current_messages.append({
-                "role": "tool",
-                "content": tool_result
-            })
-    
-    log(f"\nWarning: Reached max tool rounds ({max_tool_rounds})")
-    return "Agent completed maximum number of tool rounds."
 
 
 def build_persona_task(persona: CitizenPersona, agent_name: str) -> str:
@@ -258,9 +178,6 @@ def run_persona_agent(
     
     log(f"\nStarting {persona.name} agent...")
     
-    # Track tool calls for memory
-    tool_history = []
-    
     final_response = call_ollama_with_tools(
         ollama_url=ollama_url,
         model=model,
@@ -268,18 +185,16 @@ def run_persona_agent(
         tools=REALM_TOOLS,
         network=network,
         realm_folder=realm_folder,
-        tool_history=tool_history
     )
     
     # Save session to memory
-    action_types = list(set(t.get('tool') for t in tool_history if t.get('tool')))
-    action_summary = f"Session with {len(tool_history)} actions: {', '.join(action_types)}"
+    action_summary = f"Completed {persona.name} persona session"
     
     memory.remember(
         action_type="session",
         action_summary=action_summary,
         realm_principal=realm_principal,
-        action_details={"tools": tool_history, "response": final_response[:500]},
+        action_details={"response": final_response[:500]},
         emotional_state=_infer_emotional_state(persona_name, final_response),
         observations=_extract_observations(final_response)
     )

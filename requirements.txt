@@ -1,11 +1,8 @@
-ic-py
-internet-computer-wallet
 requests>=2.25.0
 psycopg2-binary
 pyyaml
 flask>=2.0.0
 flask-cors
-numpy>=1.24.0
 runpod
 realms-gos>=0.2.5
 typer>=0.9.0

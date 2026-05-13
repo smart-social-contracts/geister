@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Ashoka API - Simple HTTP service for AI governance advice with multi-persona support
+Geister API - HTTP service for AI governance advice with multi-persona support
 """
 import json
+import re
 import requests
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
@@ -15,7 +16,7 @@ import os
 import time
 import atexit
 from database.db_client import DatabaseClient
-from persona_manager import PersonaManager
+from citizen_personas import get_persona as get_yaml_persona, get_personas, list_personas as list_yaml_persona_names, get_personas_by_type, reload_personas
 from realm_tools import REALM_TOOLS, execute_tool, realm_status, fetch_codex
 
 
@@ -33,8 +34,24 @@ CORS(app,
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
      supports_credentials=False)
 
-# Initialize persona manager
-persona_manager = PersonaManager()
+# Default persona
+DEFAULT_PERSONA = "ashoka"
+
+
+def get_persona_or_default(persona_name=None):
+    """Get persona content by name, falling back to the default.
+    
+    Returns (actual_persona_name, system_prompt_content).
+    """
+    if persona_name:
+        persona = get_yaml_persona(persona_name)
+        if persona:
+            return persona.name.lower(), persona.system_prompt
+    # Fall back to default
+    default = get_yaml_persona(DEFAULT_PERSONA)
+    if default:
+        return default.name.lower(), default.system_prompt
+    return DEFAULT_PERSONA, "You are a helpful AI governance assistant."
 
 # Model configuration with fallback
 DEFAULT_LLM_MODEL = os.getenv('DEFAULT_LLM_MODEL', 'gpt-oss:20b')
@@ -233,19 +250,7 @@ def build_user_context(user_principal, realm_principal):
 
 def build_prompt(user_principal, realm_principal, question, realm_status=None, persona_name=None, agent_name=None, agent_background=None, agent_id=None):
     """Build complete prompt with persona + structured context + history + question"""
-    # Get persona content using PersonaManager
-    actual_persona_name, persona_content = persona_manager.get_persona_or_default(persona_name)
-    
-    # If PersonaManager didn't find the requested persona, try YAML personas
-    if persona_name and actual_persona_name != persona_name:
-        try:
-            from citizen_personas import get_persona as get_yaml_persona
-            yaml_persona = get_yaml_persona(persona_name)
-            if yaml_persona:
-                actual_persona_name = yaml_persona.name.lower()
-                persona_content = yaml_persona.system_prompt
-        except Exception:
-            pass
+    actual_persona_name, persona_content = get_persona_or_default(persona_name)
     
     # If agent_name is provided, add identity instruction to persona
     if agent_name:
@@ -358,7 +363,7 @@ def save_to_conversation(user_principal, realm_principal, question, answer, prom
             question, 
             answer, 
             prompt, 
-            persona_name=persona_name or persona_manager.default_persona,
+            persona_name=persona_name or DEFAULT_PERSONA,
             agent_id=agent_id
         )
         
@@ -502,7 +507,7 @@ def ask():
             log(f"Error fetching codex for explanation: {e}")
     
     # Get actual persona name used (with fallback)
-    actual_persona_name, _ = persona_manager.get_persona_or_default(persona_name)
+    actual_persona_name, _ = get_persona_or_default(persona_name)
     
     # Fetch realm status upfront so the assistant always knows which realm it's in
     fetched_realm_status = None
@@ -689,16 +694,6 @@ def ask():
     except Exception as e:
         log(f"Error: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
-
-
-@app.route('/api/ask-with-tools', methods=['POST'])
-def ask_with_tools():
-    """
-    DEPRECATED: Use /api/ask instead which now includes tool calling support.
-    This endpoint redirects to /api/ask for backward compatibility.
-    """
-    log("WARNING: /api/ask-with-tools is deprecated. Use /api/ask instead.")
-    return ask()
 
 
 def stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, persona_name, network="staging", realm_folder=".", agent_id=None, verbosity=0):
@@ -959,7 +954,7 @@ def get_suggestions():
             history_text = ""
         
         # Get persona content for suggestions
-        actual_persona_name, persona_content = persona_manager.get_persona_or_default(persona_name)
+        actual_persona_name, persona_content = get_persona_or_default(persona_name)
         
         # Create context-aware suggestions based on conversation history
         suggestions_prompt = f"""{persona_content}
@@ -993,7 +988,6 @@ Format your response as exactly 3 questions, one per line, with no numbering or 
                     # Clean up any numbering or formatting
                     cleaned_line = line
                     # Remove common prefixes like "1.", "2.", etc.
-                    import re
                     cleaned_line = re.sub(r'^\d+\.\s*', '', cleaned_line)
                     cleaned_line = re.sub(r'^[-*]\s*', '', cleaned_line)
                     
@@ -1032,7 +1026,7 @@ Format your response as exactly 3 questions, one per line, with no numbering or 
         
         return jsonify({
             "suggestions": suggestions,
-            "persona_used": persona_manager.default_persona
+            "persona_used": DEFAULT_PERSONA
         })
 
 VERSION = "0.1.6"
@@ -1311,15 +1305,11 @@ def list_personas():
     update_activity()
     
     try:
-        from citizen_personas import list_personas as list_yaml_personas
-        yaml_personas = list_yaml_personas()
-        # Merge with PersonaManager personas (txt-based)
-        txt_personas = persona_manager.get_available_personas()
-        all_names = list(set(yaml_personas + txt_personas))
+        persona_names = list_yaml_persona_names()
         return jsonify({
             "success": True,
-            "personas": sorted(all_names),
-            "default_persona": persona_manager.default_persona
+            "personas": sorted(persona_names),
+            "default_persona": DEFAULT_PERSONA
         })
     except Exception as e:
         log(f"Error listing personas: {traceback.format_exc()}")
@@ -1331,7 +1321,6 @@ def list_all_typed_personas():
     update_activity()
     
     try:
-        from citizen_personas import get_personas
         all_personas = get_personas()
         
         result = []
@@ -1359,7 +1348,6 @@ def list_assistant_personas():
     update_activity()
     
     try:
-        from citizen_personas import get_personas_by_type
         assistants = get_personas_by_type("assistant")
         
         result = []
@@ -1387,22 +1375,13 @@ def get_persona(persona_name):
     update_activity()
     
     try:
-        content = persona_manager.get_persona_content(persona_name)
-        display_name = persona_name
+        persona = get_yaml_persona(persona_name)
         
-        # Fall back to YAML personas if not found in PersonaManager
-        if content is None:
-            try:
-                from citizen_personas import get_persona as get_yaml_persona
-                yaml_persona = get_yaml_persona(persona_name)
-                if yaml_persona:
-                    content = yaml_persona.system_prompt
-                    display_name = yaml_persona.name
-            except Exception:
-                pass
-        
-        if content is None:
+        if not persona:
             return jsonify({"error": f"Persona '{persona_name}' not found"}), 404
+        
+        content = persona.system_prompt
+        display_name = persona.name
         
         # Basic validation info
         validation = {
@@ -1416,7 +1395,7 @@ def get_persona(persona_name):
             "name": display_name,
             "content": content,
             "validation": validation,
-            "is_default": persona_name == persona_manager.default_persona
+            "is_default": persona_name.lower() == DEFAULT_PERSONA
         })
     except Exception as e:
         log(f"Error getting persona {persona_name}: {traceback.format_exc()}")
@@ -1426,50 +1405,13 @@ def get_persona(persona_name):
 def create_persona():
     """Create a new persona"""
     update_activity()
-    
-    data = request.json
-    persona_name = data.get('name')
-    content = data.get('content')
-    
-    if not persona_name or not content:
-        return jsonify({"error": "Missing required fields: name and content"}), 400
-    
-    try:
-        success = persona_manager.create_persona(persona_name, content)
-        if success:
-            return jsonify({
-                "success": True,
-                "message": f"Persona '{persona_name}' created successfully"
-            })
-        else:
-            return jsonify({
-                "success": False,
-                "error": "Failed to create persona (invalid name or content)"
-            }), 400
-    except Exception as e:
-        log(f"Error creating persona {persona_name}: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"error": "Persona creation via API is not supported. Add YAML files to prompts/personas/ instead."}), 501
 
 @app.route('/api/personas/<persona_name>', methods=['DELETE'])
 def delete_persona(persona_name):
     """Delete a persona"""
     update_activity()
-    
-    try:
-        success = persona_manager.delete_persona(persona_name)
-        if success:
-            return jsonify({
-                "success": True,
-                "message": f"Persona '{persona_name}' deleted successfully"
-            })
-        else:
-            return jsonify({
-                "success": False,
-                "error": f"Failed to delete persona '{persona_name}' (not found or is default)"
-            }), 400
-    except Exception as e:
-        log(f"Error deleting persona {persona_name}: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"error": "Persona deletion via API is not supported. Remove YAML files from prompts/personas/ instead."}), 501
 
 @app.route('/api/personas/analytics/usage', methods=['GET'])
 def get_persona_usage_analytics():
@@ -1528,7 +1470,6 @@ def get_logs():
     log_files = {
         'api': log_dir / 'api.log',
         'ollama': log_dir / 'ollama.log',
-        'chromadb': log_dir / 'chromadb.log',
     }
     
     try:

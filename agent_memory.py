@@ -526,8 +526,8 @@ def _ensure_is_default_column():
 # Run migration on module load
 try:
     _ensure_is_default_column()
-except:
-    pass
+except Exception as e:
+    logger.debug(f"Schema migration skipped (DB may not be available): {e}")
 
 
 TELOS_TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "telos_templates")
@@ -580,8 +580,8 @@ try:
         "Redeem credits, deploy a new realm, and join it as admin",
         "realm_founder.txt",
     )
-except:
-    pass
+except Exception as e:
+    logger.debug(f"Telos template seeding skipped (DB may not be available): {e}")
 
 
 def list_telos_templates() -> List[Dict]:

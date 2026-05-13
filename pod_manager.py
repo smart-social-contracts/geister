@@ -739,7 +739,7 @@ class PodManager:
         
         Args:
             pod_type: Pod type (main or branch)
-            log_type: Type of logs - 'api', 'ollama', 'chromadb', or 'all'
+            log_type: Type of logs - 'api', 'ollama', or 'all'
             lines: Number of lines to return
         """
         api_url = self._get_api_url(pod_type)
