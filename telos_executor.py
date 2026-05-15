@@ -26,7 +26,12 @@ from realm_tools import REALM_TOOLS, execute_tool
 
 # Configuration
 EXECUTOR_INTERVAL_SECONDS = 0  # No delay between execution cycles
-OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434')
+OLLAMA_URL = os.getenv('OLLAMA_URL')
+if not OLLAMA_URL:
+    raise RuntimeError(
+        "OLLAMA_URL environment variable is required but not set. "
+        "Example: export OLLAMA_URL=https://geister-ollama.realmsgos.dev"
+    )
 DEFAULT_MODEL = os.getenv('LLM_MODEL', 'gpt-oss:20b')
 DEFAULT_NETWORK = os.getenv('NETWORK', 'staging')
 OLLAMA_READY_TIMEOUT = int(os.getenv('OLLAMA_READY_TIMEOUT', '120'))  # seconds

@@ -33,7 +33,12 @@ from ollama_client import call_ollama_with_tools
 
 
 # Default configuration
-DEFAULT_OLLAMA_HOST = os.getenv('OLLAMA_HOST', 'http://localhost:11434')
+DEFAULT_OLLAMA_HOST = os.getenv('OLLAMA_URL') or os.getenv('OLLAMA_HOST')
+if not DEFAULT_OLLAMA_HOST:
+    raise RuntimeError(
+        "OLLAMA_URL environment variable is required but not set. "
+        "Example: export OLLAMA_URL=https://geister-ollama.realmsgos.dev"
+    )
 DEFAULT_MODEL = os.getenv('VOTER_AGENT_MODEL', 'gpt-oss:20b')
 DEFAULT_NETWORK = 'staging'
 DEFAULT_REALM_FOLDER = '.'
@@ -212,9 +217,6 @@ def main():
     )
     
     args = parser.parse_args()
-    
-    if 'OLLAMA_HOST' not in os.environ and DEFAULT_OLLAMA_HOST == 'http://localhost:11434':
-        log("Note: OLLAMA_HOST not set. Using localhost:11434")
     
     try:
         run_voter_agent(

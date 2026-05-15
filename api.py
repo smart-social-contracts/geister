@@ -55,7 +55,12 @@ def get_persona_or_default(persona_name=None):
 
 # Model configuration with fallback
 DEFAULT_LLM_MODEL = os.getenv('DEFAULT_LLM_MODEL', 'gpt-oss:20b')
-DEFAULT_OLLAMA_URL = os.getenv('OLLAMA_URL', 'http://localhost:11434')
+DEFAULT_OLLAMA_URL = os.getenv('OLLAMA_URL')
+if not DEFAULT_OLLAMA_URL:
+    raise RuntimeError(
+        "OLLAMA_URL environment variable is required but not set. "
+        "Example: export OLLAMA_URL=https://geister-ollama.realmsgos.dev"
+    )
 
 # Initialize database client
 db_client = DatabaseClient()

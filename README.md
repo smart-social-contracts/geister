@@ -150,8 +150,7 @@ geister
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `GEISTER_API_URL` | API endpoint | `https://geister-api.realmsgos.dev` |
-| `GEISTER_OLLAMA_URL` | Ollama endpoint | `https://geister-ollama.realmsgos.dev` |
-| `OLLAMA_HOST` | Local Ollama | `http://localhost:11434` |
-| `DB_PASS` | Database password | - |
+| `OLLAMA_URL` | Ollama endpoint (**required**) | — |
+| `DB_PASS` | Database password | — |
 
 Run `geister status` to see current configuration.
