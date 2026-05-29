@@ -4,4 +4,6 @@ credentials-file: /root/.cloudflared/credentials.json
 ingress:
   - hostname: geister-ollama.realmsgos.dev
     service: http://localhost:11434
+  - hostname: geister-api.realmsgos.dev
+    service: http://localhost:5000
   - service: http_status:404
