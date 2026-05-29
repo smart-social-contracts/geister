@@ -348,7 +348,7 @@ def registry_deploy_realm(
     try:
         realm_config = {
             "name": realm_name,
-            "descriptions": {"en": description or f"Realm created by agent: {realm_name}"},
+            "manifestos": {"en": description or f"Realm created by agent: {realm_name}"},
             "languages": ["en"],
             "welcome_messages": {"en": welcome_message or f"Welcome to {realm_name}!"},
             "token_enabled": True,
@@ -946,9 +946,9 @@ REALM_TOOLS = [
                         "type": "string",
                         "description": "Name for the new realm"
                     },
-                    "description": {
+                    "manifesto": {
                         "type": "string",
-                        "description": "A compelling description of the realm's purpose and vision"
+                        "description": "A compelling manifesto of the realm's purpose and vision"
                     },
                     "logo_url": {
                         "type": "string",
