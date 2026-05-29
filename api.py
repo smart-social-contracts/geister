@@ -253,7 +253,40 @@ def build_user_context(user_principal, realm_principal):
         log(f"Error building user context: {e}")
         return f"\n=== USER CONTEXT ===\nUser: {user_principal[:8]}...\nError loading user history\n\n"
 
-def build_prompt(user_principal, realm_principal, question, realm_status=None, persona_name=None, agent_name=None, agent_background=None, agent_id=None):
+def build_page_context_section(page_context):
+    """Build an LLM-friendly description of what the user is currently looking at.
+
+    page_context is an optional dict sent by the frontend describing the active
+    view, e.g. {"pathname": "/extensions/voting", "extensionId": "voting", "title": "Voting"}.
+    """
+    if not page_context or not isinstance(page_context, dict):
+        return ""
+
+    title = (page_context.get('title') or '').strip()
+    pathname = (page_context.get('pathname') or '').strip()
+    extension_id = (page_context.get('extensionId') or '').strip()
+    extra = (page_context.get('description') or '').strip()
+
+    if not (title or pathname or extension_id or extra):
+        return ""
+
+    lines = ["\n=== CURRENT PAGE THE USER IS VIEWING ==="]
+    if title:
+        lines.append(f"Page: {title}")
+    if extension_id:
+        lines.append(f"Active extension: {extension_id}")
+    if pathname:
+        lines.append(f"Route: {pathname}")
+    if extra:
+        lines.append(f"Details: {extra}")
+    lines.append(
+        "Use this to interpret references like \"this page\", \"here\", or \"what I'm looking at\". "
+        "Prefer answers relevant to this view, but still verify realm data with tools when needed."
+    )
+    return "\n".join(lines) + "\n\n"
+
+
+def build_prompt(user_principal, realm_principal, question, realm_status=None, persona_name=None, agent_name=None, agent_background=None, agent_id=None, conversation_id=None, page_context=None):
     """Build complete prompt with persona + structured context + history + question"""
     actual_persona_name, persona_content = get_persona_or_default(persona_name)
     
@@ -308,10 +341,14 @@ TRUTHFULNESS ABOUT PAST ACTIONS:
     # Build user context
     user_context = build_user_context(user_principal, realm_principal)
     
-    # Get conversation history for context (filtered by user + agent)
+    # Build page context (what the user is currently viewing in the UI)
+    page_context_section = build_page_context_section(page_context)
+
+    # Get conversation history for context (scoped to this thread when available,
+    # otherwise the user's overall history with this agent)
     history_text = ""
     try:
-        history = db_client.get_conversation_history(user_principal, realm_principal, agent_id=agent_id)
+        history = db_client.get_conversation_history(user_principal, realm_principal, agent_id=agent_id, conversation_id=conversation_id)
         # Only include last 3 exchanges to keep context manageable
         recent_history = history[-3:] if len(history) > 3 else history
         for msg in recent_history:
@@ -347,7 +384,7 @@ TRUTHFULNESS ABOUT PAST ACTIONS:
             log(f"Error loading agent action history: {e}")
     
     # Complete prompt with structured context
-    prompt = f"{persona_content}{realm_context}{user_context}"
+    prompt = f"{persona_content}{realm_context}{user_context}{page_context_section}"
     
     if action_history:
         prompt += f"=== YOUR ACTION HISTORY (what you have actually done) ===\n{action_history}\n\n"
@@ -359,7 +396,7 @@ TRUTHFULNESS ABOUT PAST ACTIONS:
     
     return prompt
 
-def save_to_conversation(user_principal, realm_principal, question, answer, prompt=None, persona_name=None, agent_id=None, debug_chain=None):
+def save_to_conversation(user_principal, realm_principal, question, answer, prompt=None, persona_name=None, agent_id=None, debug_chain=None, conversation_id=None):
     """Save Q&A to conversation history with persona and agent information"""
     try:
         db_client.store_conversation(
@@ -369,8 +406,19 @@ def save_to_conversation(user_principal, realm_principal, question, answer, prom
             answer, 
             prompt, 
             persona_name=persona_name or DEFAULT_PERSONA,
-            agent_id=agent_id
+            agent_id=agent_id,
+            conversation_id=conversation_id,
         )
+
+        # Keep the thread's session record fresh and auto-title it from the first question
+        if conversation_id:
+            try:
+                default_title = (question or '').strip().replace('\n', ' ')
+                if len(default_title) > 60:
+                    default_title = default_title[:57] + '...'
+                db_client.touch_chat_session(conversation_id, default_title or 'New conversation')
+            except Exception as sess_err:
+                log(f"Error touching chat session {conversation_id}: {sess_err}")
         
         # Also save to agent memories if this is an agent conversation
         if agent_id:
@@ -484,11 +532,21 @@ def ask():
     persona_name = data.get('persona')  # Optional persona name
     agent_name = data.get('agent_name')  # Optional agent display name
     agent_background = data.get('agent_background')  # Optional agent background (age, wealth, etc.)
+    conversation_id = data.get('conversation_id')  # Optional chat thread id (for multiple conversations)
+    page_context = data.get('page_context')  # Optional info about the page the user is viewing
     ollama_url = data.get('ollama_url', DEFAULT_OLLAMA_URL)
     
     # Validate required fields - user_principal can be empty for anonymous users
     if not question:
         return jsonify({"error": "Missing required fields: a question is required"}), 400
+
+    # Ensure a chat session record exists for this thread (idempotent). This lets
+    # the assistant keep multiple independent conversations per user+realm.
+    if conversation_id and user_principal:
+        try:
+            db_client.create_chat_session(conversation_id, user_principal, realm_principal, persona_name or DEFAULT_PERSONA)
+        except Exception as e:
+            log(f"Error ensuring chat session {conversation_id}: {e}")
     
     # Handle codex explanation requests: frontend sends explain_codex_id, we fetch the code and frame the prompt
     explain_codex_id = data.get('explain_codex_id')
@@ -531,7 +589,7 @@ def ask():
             log(f"Error pre-fetching realm status: {e}")
     
     # Build complete prompt with persona and realm context
-    prompt = build_prompt(user_principal, realm_principal, question, fetched_realm_status, persona_name, agent_name, agent_background, agent_id)
+    prompt = build_prompt(user_principal, realm_principal, question, fetched_realm_status, persona_name, agent_name, agent_background, agent_id, conversation_id, page_context)
     
     # Log the complete prompt for debugging
     log("\n" + "="*80)
@@ -557,7 +615,7 @@ def ask():
         
         if stream:
             def sse_wrapper():
-                for chunk in stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, actual_persona_name, network, realm_folder, agent_id, verbosity):
+                for chunk in stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, actual_persona_name, network, realm_folder, agent_id, verbosity, conversation_id):
                     if chunk:
                         yield f"data: {json.dumps({'text': chunk})}\n\n"
                 yield "data: [DONE]\n\n"
@@ -676,7 +734,7 @@ def ask():
                 debug_chain = []
             
             # Save to conversation history with persona, agent info, and debug chain
-            save_to_conversation(user_principal, realm_principal, question, answer, prompt, actual_persona_name, agent_id, debug_chain)
+            save_to_conversation(user_principal, realm_principal, question, answer, prompt, actual_persona_name, agent_id, debug_chain, conversation_id)
             
             duration_ms = int((time_module.time() - start_time) * 1000)
             
@@ -701,7 +759,7 @@ def ask():
         return jsonify({"error": str(e)}), 500
 
 
-def stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, persona_name, network="staging", realm_folder=".", agent_id=None, verbosity=0):
+def stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, persona_name, network="staging", realm_folder=".", agent_id=None, verbosity=0, conversation_id=None):
     """Generator function for streaming responses with tool calling support.
     
     Streams from the very first Ollama call. If the model decides to use tools,
@@ -804,7 +862,7 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
                 yield chunk
             if data.get('done', False):
                 break
-        save_to_conversation(user_principal, realm_principal, question, full, prompt, persona_name, agent_id)
+        save_to_conversation(user_principal, realm_principal, question, full, prompt, persona_name, agent_id, conversation_id=conversation_id)
     
     try:
         messages = [
@@ -918,7 +976,7 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
         if final_content:
             log(f"Final answer from tool loop: {final_content[:100]}...")
             yield final_content
-            save_to_conversation(user_principal, realm_principal, question, final_content, prompt, persona_name, agent_id)
+            save_to_conversation(user_principal, realm_principal, question, final_content, prompt, persona_name, agent_id, conversation_id=conversation_id)
         else:
             log("Streaming final response after tools...")
             dbg = debug(f"Streaming final response after tools ({len(messages)} messages)")
@@ -1034,7 +1092,114 @@ Format your response as exactly 3 questions, one per line, with no numbering or 
             "persona_used": DEFAULT_PERSONA
         })
 
-VERSION = "0.1.6"
+@app.route('/api/conversations', methods=['GET'])
+def list_conversations():
+    """List a user's chat threads within a realm (for the conversation switcher)."""
+    update_activity()
+    user_principal = request.args.get('user_principal', '')
+    realm_principal = request.args.get('realm_principal', '')
+
+    if not user_principal:
+        return jsonify({"success": True, "conversations": []})
+
+    try:
+        sessions = db_client.list_chat_sessions(user_principal, realm_principal)
+        conversations = []
+        for s in sessions:
+            conversations.append({
+                "conversation_id": s.get('conversation_id'),
+                "title": s.get('title') or 'New conversation',
+                "persona": s.get('persona_name'),
+                "message_count": s.get('message_count', 0),
+                "created_at": str(s.get('created_at')) if s.get('created_at') else None,
+                "updated_at": str(s.get('updated_at')) if s.get('updated_at') else None,
+            })
+        return jsonify({"success": True, "conversations": conversations})
+    except Exception as e:
+        log(f"Error listing conversations: {traceback.format_exc()}")
+        return jsonify({"error": str(e), "conversations": []}), 500
+
+
+@app.route('/api/conversations', methods=['POST'])
+def create_conversation():
+    """Create a new chat thread and return its conversation_id."""
+    update_activity()
+    data = request.json or {}
+    user_principal = data.get('user_principal') or ""
+    realm_principal = data.get('realm_principal') or ""
+    persona_name = data.get('persona') or DEFAULT_PERSONA
+    title = data.get('title')
+
+    if not user_principal:
+        return jsonify({"error": "user_principal is required to create a saved conversation"}), 400
+
+    try:
+        conversation_id = str(uuid.uuid4())
+        db_client.create_chat_session(conversation_id, user_principal, realm_principal, persona_name, title)
+        return jsonify({
+            "success": True,
+            "conversation_id": conversation_id,
+            "title": title or 'New conversation',
+            "persona": persona_name,
+        }), 201
+    except Exception as e:
+        log(f"Error creating conversation: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/conversations/<conversation_id>/messages', methods=['GET'])
+def get_conversation_messages(conversation_id):
+    """Return the ordered messages of a single chat thread for the UI to render."""
+    update_activity()
+    try:
+        rows = db_client.get_session_messages(conversation_id)
+        messages = []
+        for row in rows:
+            messages.append({
+                "question": row.get('question'),
+                "response": row.get('response'),
+                "persona": row.get('persona_name'),
+                "created_at": str(row.get('created_at')) if row.get('created_at') else None,
+            })
+        return jsonify({"success": True, "conversation_id": conversation_id, "messages": messages})
+    except Exception as e:
+        log(f"Error getting conversation messages: {traceback.format_exc()}")
+        return jsonify({"error": str(e), "messages": []}), 500
+
+
+@app.route('/api/conversations/<conversation_id>', methods=['PUT'])
+def rename_conversation(conversation_id):
+    """Rename a chat thread."""
+    update_activity()
+    data = request.json or {}
+    title = data.get('title')
+    if not title:
+        return jsonify({"error": "title is required"}), 400
+    try:
+        updated = db_client.rename_chat_session(conversation_id, title)
+        if not updated:
+            return jsonify({"error": "Conversation not found"}), 404
+        return jsonify({"success": True, "conversation_id": conversation_id, "title": title})
+    except Exception as e:
+        log(f"Error renaming conversation: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/conversations/<conversation_id>', methods=['DELETE'])
+def delete_conversation(conversation_id):
+    """Delete a chat thread and all of its messages."""
+    update_activity()
+    try:
+        deleted = db_client.delete_chat_session(conversation_id)
+        if not deleted:
+            return jsonify({"error": "Conversation not found"}), 404
+        return jsonify({"success": True, "deleted": conversation_id})
+    except Exception as e:
+        log(f"Error deleting conversation: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+VERSION = "0.1.7"
 
 def get_git_info():
     """Get current git commit hash and datetime."""

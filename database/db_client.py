@@ -29,23 +29,129 @@ class DatabaseClient:
     def store_conversation(self, user_principal: str, realm_principal: str, 
                           question: str, response: str, prompt_context: str = None,
                           metadata: Dict = None, persona_name: str = 'ashoka',
-                          agent_id: str = None) -> int:
+                          agent_id: str = None, conversation_id: str = None) -> int:
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute("""
-                    INSERT INTO conversations (user_principal, agent_id, realm_principal, question, response, persona_name, prompt_context, metadata)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO conversations (user_principal, agent_id, realm_principal, conversation_id, question, response, persona_name, prompt_context, metadata)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
-                """, (user_principal, agent_id, realm_principal, question, response, persona_name, prompt_context, json.dumps(metadata) if metadata else None))
+                """, (user_principal, agent_id, realm_principal, conversation_id, question, response, persona_name, prompt_context, json.dumps(metadata) if metadata else None))
                 
-                conversation_id = cursor.fetchone()[0]
+                row_id = cursor.fetchone()[0]
                 self.connection.commit()
-                logger.info(f"Stored conversation with ID: {conversation_id} for user: {user_principal[:20]}... agent: {agent_id}")
-                return conversation_id
+                logger.info(f"Stored conversation row ID: {row_id} (thread: {conversation_id}) for user: {user_principal[:20]}... agent: {agent_id}")
+                return row_id
         except Exception as e:
             logger.error(f"Failed to store conversation: {e}")
             self.connection.rollback()
             raise
+
+    # =========================================================================
+    # Chat sessions (multiple conversation threads per user+realm)
+    # =========================================================================
+
+    def create_chat_session(self, conversation_id: str, user_principal: str,
+                            realm_principal: str, persona_name: str = 'ashoka',
+                            title: str = None) -> Dict:
+        """Create a new chat session thread. Idempotent on conversation_id."""
+        try:
+            with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    INSERT INTO chat_sessions (conversation_id, user_principal, realm_principal, persona_name, title)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (conversation_id) DO NOTHING
+                    RETURNING conversation_id, user_principal, realm_principal, persona_name, title, created_at, updated_at
+                """, (conversation_id, user_principal, realm_principal, persona_name, title))
+                row = cursor.fetchone()
+                self.connection.commit()
+                if row:
+                    return dict(row)
+                return {"conversation_id": conversation_id}
+        except Exception as e:
+            logger.error(f"Failed to create chat session: {e}")
+            self.connection.rollback()
+            raise
+
+    def list_chat_sessions(self, user_principal: str, realm_principal: str,
+                           limit: int = 50) -> List[Dict]:
+        """List chat session threads for a user within a realm, newest first."""
+        try:
+            with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    SELECT cs.conversation_id, cs.title, cs.persona_name,
+                           cs.created_at, cs.updated_at,
+                           (SELECT COUNT(*) FROM conversations c
+                              WHERE c.conversation_id = cs.conversation_id) AS message_count
+                    FROM chat_sessions cs
+                    WHERE cs.user_principal = %s AND cs.realm_principal = %s
+                    ORDER BY cs.updated_at DESC
+                    LIMIT %s
+                """, (user_principal, realm_principal, limit))
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Failed to list chat sessions: {e}")
+            return []
+
+    def get_session_messages(self, conversation_id: str) -> List[Dict]:
+        """Get all messages (question/response pairs) for a single thread, oldest first."""
+        try:
+            with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    SELECT question, response, persona_name, created_at
+                    FROM conversations
+                    WHERE conversation_id = %s
+                    ORDER BY created_at ASC
+                """, (conversation_id,))
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Failed to get session messages: {e}")
+            return []
+
+    def rename_chat_session(self, conversation_id: str, title: str) -> bool:
+        """Rename a chat session thread."""
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute("""
+                    UPDATE chat_sessions SET title = %s, updated_at = NOW()
+                    WHERE conversation_id = %s
+                """, (title, conversation_id))
+                updated = cursor.rowcount > 0
+                self.connection.commit()
+                return updated
+        except Exception as e:
+            logger.error(f"Failed to rename chat session: {e}")
+            self.connection.rollback()
+            return False
+
+    def delete_chat_session(self, conversation_id: str) -> bool:
+        """Delete a chat session thread and all of its messages."""
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute("DELETE FROM conversations WHERE conversation_id = %s", (conversation_id,))
+                cursor.execute("DELETE FROM chat_sessions WHERE conversation_id = %s", (conversation_id,))
+                deleted = cursor.rowcount > 0
+                self.connection.commit()
+                return deleted
+        except Exception as e:
+            logger.error(f"Failed to delete chat session: {e}")
+            self.connection.rollback()
+            return False
+
+    def touch_chat_session(self, conversation_id: str, default_title: str = None) -> None:
+        """Bump a session's updated_at, and set its title from the first question if still empty."""
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute("""
+                    UPDATE chat_sessions
+                    SET updated_at = NOW(),
+                        title = COALESCE(NULLIF(title, ''), %s)
+                    WHERE conversation_id = %s
+                """, (default_title, conversation_id))
+                self.connection.commit()
+        except Exception as e:
+            logger.error(f"Failed to touch chat session: {e}")
+            self.connection.rollback()
     
     def get_conversation(self, conversation_id: int) -> Optional[Dict]:
         try:
@@ -82,13 +188,21 @@ class DatabaseClient:
             logger.error(f"Failed to get conversations by user: {e}")
             return []
     
-    def get_conversation_history(self, user_principal: str, realm_principal: str, persona_name: str = None, agent_id: str = None) -> List[Dict]:
-        """Get conversation history for a specific user+agent pair, optionally filtered by realm and persona"""
+    def get_conversation_history(self, user_principal: str, realm_principal: str, persona_name: str = None, agent_id: str = None, conversation_id: str = None) -> List[Dict]:
+        """Get conversation history for a specific user+agent pair, optionally filtered by realm, persona and thread.
+
+        When conversation_id is provided, history is scoped to that single thread, which
+        lets a user keep multiple independent conversations with the assistant.
+        """
         try:
             with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
                 # Build query based on provided filters
                 conditions = ["user_principal = %s"]
                 params = [user_principal]
+                
+                if conversation_id:
+                    conditions.append("conversation_id = %s")
+                    params.append(conversation_id)
                 
                 if agent_id:
                     conditions.append("agent_id = %s")

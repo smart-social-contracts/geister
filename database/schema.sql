@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     user_principal TEXT NOT NULL,
     agent_id TEXT,                        -- Agent identity (e.g., swarm_agent_001)
     realm_principal TEXT NOT NULL,
+    conversation_id TEXT,                 -- Groups messages into a single chat thread (UUID)
     question TEXT NOT NULL,
     response TEXT NOT NULL,
     persona_name TEXT NOT NULL DEFAULT 'ashoka',
@@ -11,13 +12,32 @@ CREATE TABLE IF NOT EXISTS conversations (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Add conversation_id to existing deployments (no-op if already present)
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS conversation_id TEXT;
+
 -- Indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_conversations_persona_name ON conversations(persona_name);
 CREATE INDEX IF NOT EXISTS idx_conversations_user_realm_persona ON conversations(user_principal, realm_principal, persona_name);
 CREATE INDEX IF NOT EXISTS idx_conversations_user_agent ON conversations(user_principal, agent_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_conversation_id ON conversations(conversation_id);
 
 GRANT ALL PRIVILEGES ON TABLE conversations TO geister_user;
 GRANT USAGE, SELECT ON SEQUENCE conversations_id_seq TO geister_user;
+
+-- Chat sessions: one row per conversation thread (for listing/renaming in the UI)
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    conversation_id TEXT PRIMARY KEY,     -- UUID shared with conversations.conversation_id
+    user_principal TEXT NOT NULL,
+    realm_principal TEXT NOT NULL,
+    persona_name TEXT DEFAULT 'ashoka',
+    title TEXT,                           -- Human-readable thread title (auto from first question)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_realm ON chat_sessions(user_principal, realm_principal, updated_at DESC);
+
+GRANT ALL PRIVILEGES ON TABLE chat_sessions TO geister_user;
 
 -- Agent memories table for persistent agent life stories
 CREATE TABLE IF NOT EXISTS agent_memories (
