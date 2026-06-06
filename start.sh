@@ -54,7 +54,8 @@ export DEFAULT_LLM_MODEL=${DEFAULT_LLM_MODEL:-gpt-oss:20b}
 export GEISTER_USE_LLM=true
 export GEISTER_DFX_NETWORK=ic
 export DFX_WARNING=-mainnet_plaintext_identity
-export INACTIVITY_TIMEOUT_SECONDS=0
+# Respect RunPod env (pod_manager sets 3600); default 1h auto-shutdown. Set 0 to disable.
+export INACTIVITY_TIMEOUT_SECONDS=${INACTIVITY_TIMEOUT_SECONDS:-3600}
 
 mkdir -p logs
 python3 api.py >> logs/api.log 2>&1 &

@@ -37,6 +37,9 @@ CORS(app,
 # Default persona
 DEFAULT_PERSONA = "ashoka"
 
+# Cap blocking dfx prefetch so SSE can start before Cloudflare's ~100s origin timeout
+REALM_STATUS_PREFETCH_TIMEOUT_SECONDS = 5
+
 
 def get_persona_or_default(persona_name=None):
     """Get persona content by name, falling back to the default.
@@ -71,6 +74,29 @@ INACTIVITY_CHECK_INTERVAL_SECONDS = int(os.getenv('INACTIVITY_CHECK_INTERVAL_SEC
 last_activity_time = time.time()
 inactivity_monitor_thread = None
 shutdown_initiated = False
+
+def _prefetch_realm_status(realm_principal: str, network: str = "staging"):
+    """Fetch realm status with a short timeout; returns None on failure or timeout."""
+    if not realm_principal:
+        return None
+    try:
+        raw = realm_status(
+            network=network,
+            realm_principal=realm_principal,
+            timeout=REALM_STATUS_PREFETCH_TIMEOUT_SECONDS,
+            enrich_votes=False,
+        )
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+        if isinstance(parsed, dict) and "error" in parsed:
+            log(f"Could not fetch realm status: {parsed.get('error', 'unknown')}")
+            return None
+        metrics = parsed.get("data", {}).get("status", parsed)
+        log(f"Pre-fetched realm status for {realm_principal}")
+        return {"realm_principal": realm_principal, "metrics": metrics}
+    except Exception as e:
+        log(f"Error pre-fetching realm status: {e}")
+        return None
+
 
 def build_structured_realm_context(realm_status):
     """Build structured, LLM-friendly realm context"""
@@ -446,7 +472,7 @@ def save_to_conversation(user_principal, realm_principal, question, answer, prom
         log(f"Error: Could not save conversation to database: {e}")
 
 def update_activity():
-    """Update the last activity timestamp"""
+    """Update the last activity timestamp (user-initiated actions only, not health/polling)."""
     global last_activity_time
     last_activity_time = time.time()
     log(f"Activity updated at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_activity_time))}")
@@ -571,43 +597,24 @@ def ask():
     
     # Get actual persona name used (with fallback)
     actual_persona_name, _ = get_persona_or_default(persona_name)
-    
-    # Fetch realm status upfront so the assistant always knows which realm it's in
-    fetched_realm_status = None
-    if realm_principal:
-        try:
-            raw = realm_status(network=data.get('network', 'staging'), realm_principal=realm_principal)
-            parsed = json.loads(raw) if isinstance(raw, str) else raw
-            if "error" not in parsed:
-                # Extract metrics from nested dfx response: {data: {status: {...}}}
-                metrics = parsed.get("data", {}).get("status", parsed)
-                fetched_realm_status = {"realm_principal": realm_principal, "metrics": metrics}
-                log(f"Pre-fetched realm status for {realm_principal}")
-            else:
-                log(f"Could not fetch realm status: {parsed.get('error', 'unknown')}")
-        except Exception as e:
-            log(f"Error pre-fetching realm status: {e}")
-    
-    # Build complete prompt with persona and realm context
-    prompt = build_prompt(user_principal, realm_principal, question, fetched_realm_status, persona_name, agent_name, agent_background, agent_id, conversation_id, page_context)
-    
-    # Log the complete prompt for debugging
-    log("\n" + "="*80)
-    log("COMPLETE PROMPT SENT TO OLLAMA:")
-    log("="*80)
-    log(prompt)
-    log("="*80 + "\n")
-    
+
     # Check if streaming is requested
     stream = data.get('stream', False)
-    
+
     # Verbosity level: 0=Q&A only, 1=debug without stream lines, 2=full debug
     verbosity = data.get('verbosity', 0)
-    
+
     # Tool calling parameters
     realm_folder = data.get('realm_folder', '.')
     network = data.get('network', 'staging')
-    
+
+    def _log_prompt(prompt_text):
+        log("\n" + "="*80)
+        log("COMPLETE PROMPT SENT TO OLLAMA:")
+        log("="*80)
+        log(prompt_text)
+        log("="*80 + "\n")
+
     # Send to Ollama using chat API with tools
     try:
         import time as time_module
@@ -615,6 +622,14 @@ def ask():
         
         if stream:
             def sse_wrapper():
+                # Send an immediate SSE comment so proxies/clients know the connection is alive
+                yield ": connected\n\n"
+                fetched_realm_status = _prefetch_realm_status(realm_principal, network)
+                prompt = build_prompt(
+                    user_principal, realm_principal, question, fetched_realm_status,
+                    persona_name, agent_name, agent_background, agent_id, conversation_id, page_context
+                )
+                _log_prompt(prompt)
                 for chunk in stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, actual_persona_name, network, realm_folder, agent_id, verbosity, conversation_id):
                     if chunk:
                         yield f"data: {json.dumps({'text': chunk})}\n\n"
@@ -627,6 +642,13 @@ def ask():
                               'Connection': 'keep-alive'
                           })
         else:
+            fetched_realm_status = _prefetch_realm_status(realm_principal, network)
+            prompt = build_prompt(
+                user_principal, realm_principal, question, fetched_realm_status,
+                persona_name, agent_name, agent_background, agent_id, conversation_id, page_context
+            )
+            _log_prompt(prompt)
+
             # Build messages for chat API
             messages = [
                 {"role": "system", "content": prompt},
@@ -1217,9 +1239,6 @@ def get_git_info():
 
 @app.route('/', methods=['GET'])
 def health():
-    # Update activity timestamp
-    update_activity()
-    
     commit_hash, commit_datetime = get_git_info()
     
     return jsonify({
@@ -1234,8 +1253,6 @@ def health():
 @app.route('/api/agents', methods=['GET'])
 def list_agents():
     """List all agents with their profiles"""
-    update_activity()
-    
     try:
         from agent_memory import list_all_agents
         agents = list_all_agents()
@@ -1937,7 +1954,6 @@ def get_events():
         status: 'success', 'error', or omit for all
         limit: Max events (default 100)
     """
-    update_activity()
     try:
         from agent_memory import get_all_events
         events = get_all_events(
@@ -1959,7 +1975,6 @@ def get_events():
 @app.route('/api/events/filters', methods=['GET'])
 def get_event_filters():
     """Get available filter options for the monitor page."""
-    update_activity()
     try:
         from agent_memory import get_event_filter_options
         options = get_event_filter_options()
@@ -2011,7 +2026,6 @@ app.static_folder = str(Path(__file__).parent / 'static')
 @app.route('/api/telos/executor/status', methods=['GET'])
 def get_executor_status_api():
     """Get the telos executor status."""
-    update_activity()
     try:
         from telos_executor import get_executor_status, get_execution_log
         status = get_executor_status()
@@ -2055,7 +2069,6 @@ def stop_executor_api():
 @app.route('/api/telos/executor/log', methods=['GET'])
 def get_executor_log_api():
     """Get the telos executor execution log."""
-    update_activity()
     try:
         from telos_executor import get_execution_log
         limit = request.args.get('limit', 50, type=int)

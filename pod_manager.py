@@ -443,7 +443,7 @@ class PodManager:
                 try:
                     self._print(f"\n🔄 Trying GPU {i+1}/{len(affordable_gpus)}: {selected_gpu['name']} - ${selected_gpu['price']:.3f}/hr")
 
-                    # TODO: set INACTIVITY_TIMEOUT_SECONDS as environment variable for branch pod only (main should never shutdown...)
+                    inactivity_timeout = int(self.config.get('INACTIVITY_TIMEOUT_SECONDS', '3600'))
 
                     # Use the RunPod SDK to create the pod with proper parameters
                     gpu_count = int(self.config.get('GPU_COUNT', '1'))
@@ -459,11 +459,10 @@ class PodManager:
                         container_disk_in_gb=container_disk,  # Container disk
                         support_public_ip=True,
                         start_ssh=True,
-                        # env={'INACTIVITY_TIMEOUT_SECONDS': self.cnfig.get('INACTIVITY_TIMEOUT_SECONDS')} if pod_type == "branch" else None
                         env={
                             'RUNPOD_API_KEY': self.api_key,
                             'POD_TYPE': pod_type,
-                            'INACTIVITY_TIMEOUT_SECONDS': 3600}
+                            'INACTIVITY_TIMEOUT_SECONDS': inactivity_timeout}
                     )
                     
                     if self.verbose:
