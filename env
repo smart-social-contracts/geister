@@ -3,6 +3,7 @@ NETWORK_VOLUME_ID=99taves6so
 MAX_GPU_PRICE=0.30
 MIN_GPU_PRICE=0.05
 GPU_COUNT=1
+INACTIVITY_TIMEOUT_SECONDS=3600
 
 # Use Cloudflare tunnel DNS
 API_URL=https://geister-api.realmsgos.dev 

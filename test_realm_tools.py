@@ -13,6 +13,9 @@ from realm_tools import (
     REALM_TOOLS,
     TOOL_FUNCTIONS,
     execute_tool,
+    extract_proposal_id_from_focus_uri,
+    format_proposal_context_for_prompt,
+    _candid_extension_call_args,
 )
 
 
@@ -123,6 +126,47 @@ class TestExecuteTool(unittest.TestCase):
         
         self.assertIn("error", result.lower())
         self.assertIn("unknown tool", result.lower())
+
+
+class TestProposalContext(unittest.TestCase):
+    def test_extract_proposal_id_from_focus_uri(self):
+        self.assertEqual(
+            extract_proposal_id_from_focus_uri("realms://voting/proposal/demo_prop_0002"),
+            "demo_prop_0002",
+        )
+        self.assertIsNone(extract_proposal_id_from_focus_uri("realms://codex_viewer/codex/tax"))
+
+    def test_format_proposal_context_for_prompt(self):
+        text = format_proposal_context_for_prompt({
+            "proposal_id": "demo_prop_0002",
+            "proposal": {
+                "id": "demo_prop_0002",
+                "title": "Increase transport budget",
+                "description": "Allocate 12% more to buses.",
+                "status": "voting",
+                "proposer": "demo_user",
+                "votes": {"yes": 0, "no": 9, "abstain": 2},
+            },
+            "code": {"code": "def apply():\n    pass\n"},
+        })
+        self.assertIn("PROPOSAL IN FOCUS", text)
+        self.assertIn("demo_prop_0002", text)
+        self.assertIn("Allocate 12% more", text)
+        self.assertIn("def apply():", text)
+
+    def test_fetch_proposal_code_tool_registered(self):
+        self.assertIn("fetch_proposal_code", TOOL_FUNCTIONS)
+        tool_names = [t["function"]["name"] for t in REALM_TOOLS if t.get("function")]
+        self.assertIn("fetch_proposal_code", tool_names)
+
+    def test_candid_extension_call_args(self):
+        args = _candid_extension_call_args(
+            "voting",
+            "get_proposal",
+            {"proposal_id": "demo_prop_0002"},
+        )
+        self.assertTrue(args.startswith('("voting", "get_proposal",'))
+        self.assertIn("demo_prop_0002", args)
 
 
 if __name__ == "__main__":

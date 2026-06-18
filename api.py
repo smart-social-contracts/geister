@@ -5,6 +5,7 @@ Geister API - HTTP service for AI governance advice with multi-persona support
 import json
 import re
 import requests
+from typing import Optional
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 from pathlib import Path
@@ -17,7 +18,15 @@ import time
 import atexit
 from database.db_client import DatabaseClient
 from citizen_personas import get_persona as get_yaml_persona, get_personas, list_personas as list_yaml_persona_names, get_personas_by_type, reload_personas
-from realm_tools import REALM_TOOLS, execute_tool, realm_status, fetch_codex
+from realm_tools import (
+    REALM_TOOLS,
+    execute_tool,
+    realm_status,
+    fetch_codex,
+    fetch_proposal_context,
+    extract_proposal_id_from_focus_uri,
+    format_proposal_context_for_prompt,
+)
 
 
 def log(message):
@@ -79,10 +88,11 @@ shutdown_initiated = False
 _ensure_ollama_lock = threading.Lock()
 
 TOOL_STATUS_LABELS = {
-    "realm_status": "Checking realm status…",
+    "realm_status": "Fetching realm status…",
     "fetch_codex": "Loading codex…",
-    "get_proposals": "Fetching proposals…",
+    "fetch_proposal_code": "Loading proposal code…",
     "get_proposal": "Loading proposal…",
+    "get_proposals": "Fetching proposals…",
     "find_objects": "Searching realm records…",
     "db_get": "Querying realm database…",
     "db_schema": "Reading database schema…",
@@ -109,7 +119,38 @@ def _stream_event(event_type: str, text: str) -> dict:
     return {"type": event_type, "text": text}
 
 
-def _tool_status_label(tool_name: str) -> str:
+def _parse_tool_args(tool_args) -> dict:
+    if isinstance(tool_args, dict):
+        return tool_args
+    if isinstance(tool_args, str):
+        try:
+            parsed = json.loads(tool_args)
+            return parsed if isinstance(parsed, dict) else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    return {}
+
+
+def _proposal_fetch_status(proposal_id: str) -> str:
+    return f"Fetching realm data (proposal {proposal_id})…"
+
+
+def _tool_status_label(tool_name: str, tool_args=None) -> str:
+    args = _parse_tool_args(tool_args)
+    proposal_id = args.get("proposal_id")
+    if proposal_id and tool_name in {
+        "get_proposal",
+        "fetch_proposal_code",
+        "get_my_vote",
+        "cast_vote",
+    }:
+        action = {
+            "get_proposal": "Fetching realm data (proposal",
+            "fetch_proposal_code": "Fetching proposal code (proposal",
+            "get_my_vote": "Checking your vote (proposal",
+            "cast_vote": "Recording vote (proposal",
+        }[tool_name]
+        return f"{action} {proposal_id})…"
     return TOOL_STATUS_LABELS.get(
         tool_name,
         f"Running {tool_name.replace('_', ' ')}…",
@@ -429,7 +470,7 @@ def build_page_context_section(page_context):
     return "\n".join(lines) + "\n\n"
 
 
-def build_prompt(user_principal, realm_principal, question, realm_status=None, persona_name=None, agent_name=None, agent_background=None, agent_id=None, conversation_id=None, page_context=None):
+def build_prompt(user_principal, realm_principal, question, realm_status=None, persona_name=None, agent_name=None, agent_background=None, agent_id=None, conversation_id=None, page_context=None, proposal_context_section=""):
     """Build complete prompt with persona + structured context + history + question"""
     actual_persona_name, persona_content = get_persona_or_default(persona_name)
     
@@ -527,7 +568,7 @@ TRUTHFULNESS ABOUT PAST ACTIONS:
             log(f"Error loading agent action history: {e}")
     
     # Complete prompt with structured context
-    prompt = f"{persona_content}{realm_context}{user_context}{page_context_section}"
+    prompt = f"{persona_content}{realm_context}{user_context}{page_context_section}{proposal_context_section}"
     
     if action_history:
         prompt += f"=== YOUR ACTION HISTORY (what you have actually done) ===\n{action_history}\n\n"
@@ -538,6 +579,51 @@ TRUTHFULNESS ABOUT PAST ACTIONS:
     prompt += f"=== CURRENT QUESTION ===\nUser: {question}\n{actual_persona_name.title()}:"
     
     return prompt
+
+
+def _resolve_proposal_id_for_request(data) -> Optional[str]:
+    """Determine which proposal the user is focused on, if any."""
+    explain_proposal_id = data.get("explain_proposal_id")
+    if explain_proposal_id:
+        return str(explain_proposal_id)
+
+    focus = data.get("focus") or {}
+    proposal_id = extract_proposal_id_from_focus_uri(focus.get("uri") or "")
+    if proposal_id:
+        return proposal_id
+
+    page_context = data.get("page_context") or {}
+    if isinstance(page_context, dict):
+        for key in ("proposalId", "proposal_id"):
+            value = page_context.get(key)
+            if value:
+                return str(value)
+
+    return None
+
+
+def _load_proposal_context_section(data, realm_principal: str, network: str, realm_folder: str) -> str:
+    """Fetch live proposal details from the realm when the UI signals a proposal focus."""
+    proposal_id = _resolve_proposal_id_for_request(data)
+    if not proposal_id or not realm_principal:
+        return ""
+
+    try:
+        context = fetch_proposal_context(
+            proposal_id,
+            network=network,
+            realm_folder=realm_folder,
+            realm_principal=realm_principal,
+        )
+        if not context:
+            log(f"Could not fetch proposal context for {proposal_id}")
+            return ""
+        log(f"Loaded live proposal context for {proposal_id}: {context.get('proposal', {}).get('title', '')}")
+        return format_proposal_context_for_prompt(context)
+    except Exception as e:
+        log(f"Error fetching proposal context for {proposal_id}: {e}")
+        return ""
+
 
 def save_to_conversation(user_principal, realm_principal, question, answer, prompt=None, persona_name=None, agent_id=None, debug_chain=None, conversation_id=None):
     """Save Q&A to conversation history with persona and agent information"""
@@ -728,6 +814,12 @@ def ask():
     # Tool calling parameters
     realm_folder = data.get('realm_folder', DEFAULT_REALM_FOLDER)
     network = data.get('network', 'staging')
+    focused_proposal_id = _resolve_proposal_id_for_request(data)
+    proposal_context_section = ""
+    if not stream:
+        proposal_context_section = _load_proposal_context_section(
+            data, realm_principal, network, realm_folder
+        )
 
     def _log_prompt(prompt_text):
         log("\n" + "="*80)
@@ -743,16 +835,29 @@ def ask():
         
         if stream:
             def sse_wrapper():
+                nonlocal proposal_context_section
                 # Send an immediate SSE comment so proxies/clients know the connection is alive
                 yield ": connected\n\n"
+                if focused_proposal_id and realm_principal:
+                    yield f"data: {json.dumps(_stream_event('status', _proposal_fetch_status(focused_proposal_id)))}\n\n"
+                    proposal_context_section = _load_proposal_context_section(
+                        data, realm_principal, network, realm_folder
+                    )
+                if realm_principal:
+                    yield f"data: {json.dumps(_stream_event('status', 'Fetching realm status…'))}\n\n"
                 fetched_realm_status = _prefetch_realm_status(realm_principal, network)
                 prompt = build_prompt(
                     user_principal, realm_principal, question, fetched_realm_status,
-                    persona_name, agent_name, agent_background, agent_id, conversation_id, page_context
+                    persona_name, agent_name, agent_background, agent_id, conversation_id, page_context,
+                    proposal_context_section,
                 )
                 _log_prompt(prompt)
-                yield f"data: {json.dumps(_stream_event('status', 'Preparing context…'))}\n\n"
-                for chunk in stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, actual_persona_name, network, realm_folder, agent_id, verbosity, conversation_id):
+                for chunk in stream_response_with_tools(
+                    ollama_url, prompt, user_principal, realm_principal, question, actual_persona_name,
+                    network, realm_folder, agent_id, verbosity, conversation_id,
+                    focused_proposal_id=focused_proposal_id,
+                    proposal_prefetched=bool(proposal_context_section),
+                ):
                     if not chunk:
                         continue
                     if isinstance(chunk, str):
@@ -770,7 +875,8 @@ def ask():
             fetched_realm_status = _prefetch_realm_status(realm_principal, network)
             prompt = build_prompt(
                 user_principal, realm_principal, question, fetched_realm_status,
-                persona_name, agent_name, agent_background, agent_id, conversation_id, page_context
+                persona_name, agent_name, agent_background, agent_id, conversation_id, page_context,
+                proposal_context_section,
             )
             _log_prompt(prompt)
 
@@ -906,7 +1012,21 @@ def ask():
         return jsonify({"error": str(e)}), 500
 
 
-def stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, persona_name, network="staging", realm_folder=".", agent_id=None, verbosity=0, conversation_id=None):
+def stream_response_with_tools(
+    ollama_url,
+    prompt,
+    user_principal,
+    realm_principal,
+    question,
+    persona_name,
+    network="staging",
+    realm_folder=".",
+    agent_id=None,
+    verbosity=0,
+    conversation_id=None,
+    focused_proposal_id=None,
+    proposal_prefetched=False,
+):
     """Generator function for streaming responses with tool calling support.
     
     Streams from the very first Ollama call. If the model decides to use tools,
@@ -975,13 +1095,21 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
             {"role": "user", "content": question}
         ]
 
-        dbg = debug("Analyzing your question…")
+        if proposal_prefetched and focused_proposal_id:
+            dbg = debug(f"Analyzing proposal ({focused_proposal_id})…")
+        else:
+            dbg = debug("Analyzing your question…")
         if dbg:
             yield dbg
 
         # Quick non-streaming call WITH tools to check if tools are needed
         log("Checking for tool calls (non-streaming)...")
-        dbg = debug("Checking if realm tools are needed…")
+        if proposal_prefetched and focused_proposal_id:
+            dbg = debug(f"Composing answer from proposal ({focused_proposal_id})…")
+        elif focused_proposal_id:
+            dbg = debug(_proposal_fetch_status(focused_proposal_id))
+        else:
+            dbg = debug("Checking if realm tools are needed…")
         if dbg:
             yield dbg
 
@@ -1033,7 +1161,7 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
                 tool_args = tool_call['function']['arguments']
 
                 log(f"Executing tool: {tool_name} with args: {tool_args}")
-                dbg = debug(_tool_status_label(tool_name))
+                dbg = debug(_tool_status_label(tool_name, tool_args))
                 if dbg:
                     yield dbg
 

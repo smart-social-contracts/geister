@@ -10,9 +10,11 @@ Provides tools for:
 import subprocess
 import json
 import os
+import re
 import traceback
 import requests
 from typing import Optional, Dict, Any
+from urllib.parse import unquote
 
 
 # =============================================================================
@@ -85,6 +87,40 @@ def _run_dfx_call(
         return json.dumps({"error": str(e)})
 
 
+def _unwrap_extension_payload(raw: str) -> Dict[str, Any]:
+    """Parse nested JSON returned by extension_sync_call / extension_async_call."""
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        return {"success": False, "error": str(raw)}
+
+    if isinstance(parsed, list) and parsed:
+        parsed = parsed[0]
+    if isinstance(parsed, str):
+        try:
+            parsed = json.loads(parsed)
+        except json.JSONDecodeError:
+            return {"success": False, "error": parsed}
+
+    if not isinstance(parsed, dict):
+        return {"success": True, "data": parsed}
+
+    inner = parsed.get("response", parsed)
+    if isinstance(inner, str):
+        try:
+            inner = json.loads(inner)
+        except json.JSONDecodeError:
+            inner = {"response": inner}
+
+    return inner if isinstance(inner, dict) else {"success": True, "data": inner}
+
+
+def _candid_extension_call_args(extension: str, function: str, args: Dict[str, Any] = None) -> str:
+    """Build Candid args for extension_sync_call / extension_async_call (text, text, text)."""
+    args_json = json.dumps(args or {})
+    return f"({json.dumps(extension)}, {json.dumps(function)}, {json.dumps(args_json)})"
+
+
 def _run_extension_call(
     extension: str,
     function: str,
@@ -111,10 +147,8 @@ def _run_extension_call(
         JSON string result or error message
     """
     args_dict = args or {}
-    args_json = json.dumps(args_dict).replace('"', '\\"')
-    
-    candid_args = f'(record {{ extension_name = "{extension}"; function_name = "{function}"; args = "{args_json}"; }})'
-    
+    candid_args = _candid_extension_call_args(extension, function, args_dict)
+
     return _run_dfx_call(
         canister="realm_backend",
         method="extension_sync_call",
@@ -124,6 +158,31 @@ def _run_extension_call(
         timeout=timeout,
         identity=identity,
         realm_principal=realm_principal
+    )
+
+
+def _run_extension_async_call(
+    extension: str,
+    function: str,
+    args: Dict[str, Any] = None,
+    network: str = "staging",
+    realm_folder: str = ".",
+    timeout: int = 120,
+    identity: str = "",
+    realm_principal: str = ""
+) -> str:
+    """Run an extension async call (e.g. HTTP outcalls) with JSON output."""
+    args_dict = args or {}
+    candid_args = _candid_extension_call_args(extension, function, args_dict)
+    return _run_dfx_call(
+        canister="realm_backend",
+        method="extension_async_call",
+        args=candid_args,
+        network=network,
+        realm_folder=realm_folder,
+        timeout=timeout,
+        identity=identity,
+        realm_principal=realm_principal,
     )
 
 
@@ -543,8 +602,11 @@ def realm_status(
 
 def fetch_codex(codex_id: str, network: str = "staging", realm_principal: str = "", realm_folder: str = ".") -> Optional[Dict[str, Any]]:
     """Fetch a codex by ID from the realm canister. Returns dict with name/code or None."""
-    args_json = json.dumps({"codex_id": codex_id}).replace('"', '\\"')
-    candid_args = f'(record {{ extension_name = "codex_viewer"; function_name = "get_codex_details"; args = "{args_json}"; }})'
+    candid_args = _candid_extension_call_args(
+        "codex_viewer",
+        "get_codex_details",
+        {"codex_id": codex_id},
+    )
     raw = _run_dfx_call(
         canister="realm_backend",
         method="extension_sync_call",
@@ -663,6 +725,159 @@ def get_proposal(proposal_id: str, network: str = "staging", realm_folder: str =
         identity=identity,
         realm_principal=realm_principal
     )
+
+
+def fetch_proposal_code(
+    proposal_id: str,
+    network: str = "staging",
+    realm_folder: str = ".",
+    identity: str = "",
+    realm_principal: str = "",
+) -> str:
+    """Fetch proposal code preview (inline/sync path, or needs_remote flag)."""
+    return _run_extension_call(
+        extension="voting",
+        function="fetch_proposal_code",
+        args={"proposal_id": proposal_id},
+        network=network,
+        realm_folder=realm_folder,
+        identity=identity,
+        realm_principal=realm_principal,
+        timeout=90,
+    )
+
+
+def extract_proposal_id_from_focus_uri(uri: str) -> Optional[str]:
+    """Parse proposal id from realms://voting/proposal/{id} focus URIs."""
+    if not uri:
+        return None
+    match = re.match(r"^realms://voting/proposal/([^?#]+)", uri.strip())
+    if not match:
+        return None
+    try:
+        return unquote(match.group(1))
+    except Exception:
+        return match.group(1)
+
+
+def fetch_proposal_context(
+    proposal_id: str,
+    network: str = "staging",
+    realm_folder: str = ".",
+    identity: str = "",
+    realm_principal: str = "",
+) -> Optional[Dict[str, Any]]:
+    """Fetch live proposal metadata and code from the realm voting extension."""
+    proposal_raw = get_proposal(
+        proposal_id,
+        network=network,
+        realm_folder=realm_folder,
+        identity=identity,
+        realm_principal=realm_principal,
+    )
+    proposal_payload = _unwrap_extension_payload(proposal_raw)
+    if not proposal_payload.get("success"):
+        return None
+
+    proposal = proposal_payload.get("data", proposal_payload)
+    if not isinstance(proposal, dict):
+        return None
+
+    code_payload: Dict[str, Any] = {}
+    code_raw = fetch_proposal_code(
+        proposal_id,
+        network=network,
+        realm_folder=realm_folder,
+        identity=identity,
+        realm_principal=realm_principal,
+    )
+    code_payload = _unwrap_extension_payload(code_raw)
+    if code_payload.get("needs_remote"):
+        remote_raw = _run_extension_async_call(
+            extension="voting",
+            function="fetch_proposal_code_remote",
+            args={"proposal_id": proposal_id},
+            network=network,
+            realm_folder=realm_folder,
+            identity=identity,
+            realm_principal=realm_principal,
+            timeout=120,
+        )
+        code_payload = _unwrap_extension_payload(remote_raw)
+
+    code_data = code_payload.get("data") if code_payload.get("success") else None
+    return {"proposal_id": proposal_id, "proposal": proposal, "code": code_data}
+
+
+def format_proposal_context_for_prompt(context: Dict[str, Any]) -> str:
+    """Render fetched proposal context for the LLM system prompt."""
+    proposal = context.get("proposal") or {}
+    proposal_id = context.get("proposal_id") or proposal.get("id") or "unknown"
+    votes = proposal.get("votes") or {}
+    yes = int(votes.get("yes") or 0)
+    no = int(votes.get("no") or 0)
+    abstain = int(votes.get("abstain") or 0)
+    total = yes + no + abstain
+
+    def pct(n: int) -> str:
+        return f"{(n / total * 100):.1f}%" if total else "0.0%"
+
+    lines = [
+        "\n=== PROPOSAL IN FOCUS (live data fetched from realm) ===",
+        f"Proposal ID: {proposal_id}",
+        f"Title: {proposal.get('title') or '(untitled)'}",
+        f"Status: {proposal.get('status') or 'unknown'}",
+        f"Proposer: {proposal.get('proposer') or 'unknown'}",
+    ]
+    deadline = proposal.get("voting_deadline")
+    if deadline:
+        lines.append(f"Voting deadline (epoch seconds): {deadline}")
+    threshold = proposal.get("required_threshold")
+    if threshold is not None:
+        lines.append(f"Required approval threshold: {float(threshold) * 100:.0f}%")
+    lines.append(
+        f"Votes — Yes: {yes} ({pct(yes)}), No: {no} ({pct(no)}), "
+        f"Abstain: {abstain} ({pct(abstain)}), Total: {total}"
+    )
+    description = (proposal.get("description") or "").strip()
+    lines.append("")
+    lines.append("Description:")
+    lines.append(description or "(none)")
+
+    code_data = context.get("code")
+    if isinstance(code_data, dict):
+        files = code_data.get("files")
+        if isinstance(files, list) and files:
+            lines.append("")
+            lines.append("Proposal code files:")
+            for entry in files:
+                name = entry.get("name") or "proposal"
+                lines.append(f"--- {name} ---")
+                original = entry.get("original")
+                if original:
+                    lines.append("[Previous version]")
+                    lines.append(str(original)[:12000])
+                    lines.append("[Proposed version]")
+                lines.append(str(entry.get("code") or "")[:12000])
+        else:
+            code_text = code_data.get("code")
+            if code_text:
+                lines.append("")
+                lines.append("Proposal code:")
+                original = code_data.get("original")
+                if original:
+                    lines.append("[Previous version]")
+                    lines.append(str(original)[:12000])
+                    lines.append("[Proposed version]")
+                lines.append(str(code_text)[:12000])
+
+    lines.append("")
+    lines.append(
+        "The user is viewing this proposal in the Voting extension. "
+        "When they refer to 'this proposal', 'here', or ask for voting advice, "
+        "base your answer on the live data above — do not say you lack proposal details."
+    )
+    return "\n".join(lines) + "\n\n"
 
 
 def cast_vote(proposal_id: str, vote: str, voter_id: str, network: str = "staging", realm_folder: str = ".", identity: str = "", realm_principal: str = "") -> str:
@@ -1160,6 +1375,23 @@ REALM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "fetch_proposal_code",
+            "description": "Fetch the code attached to a proposal, including amendments/diffs when available.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "proposal_id": {
+                        "type": "string",
+                        "description": "The proposal ID to fetch code for"
+                    }
+                },
+                "required": ["proposal_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "cast_vote",
             "description": "Cast a vote on a proposal. Your voter_id is automatically filled from your identity.",
             "parameters": {
@@ -1399,6 +1631,7 @@ TOOL_FUNCTIONS = {
     # Governance
     "get_proposals": get_proposals,
     "get_proposal": get_proposal,
+    "fetch_proposal_code": fetch_proposal_code,
     "cast_vote": cast_vote,
     "get_my_vote": get_my_vote,
     "submit_proposal": submit_proposal,
