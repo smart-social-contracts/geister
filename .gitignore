@@ -68,3 +68,4 @@ cloudflared/cert.pem
 # SOPS / age — never commit plaintext secrets
 *.dec.*
 secrets.dec.*
+vm/geister-api.secrets.env

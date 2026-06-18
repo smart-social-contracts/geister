@@ -47,6 +47,12 @@ setup_env() {
         export DB_HOST=localhost
         log "Loaded geister-api.env (DB_HOST=localhost)"
     fi
+    if [ -f "$SCRIPT_DIR/geister-api.secrets.env" ]; then
+        set -a
+        source "$SCRIPT_DIR/geister-api.secrets.env"
+        set +a
+        log "Loaded geister-api.secrets.env (RunPod credentials)"
+    fi
 }
 
 is_running() {

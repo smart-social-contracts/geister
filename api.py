@@ -39,6 +39,7 @@ DEFAULT_PERSONA = "ashoka"
 
 # Cap blocking dfx prefetch so SSE can start before Cloudflare's ~100s origin timeout
 REALM_STATUS_PREFETCH_TIMEOUT_SECONDS = 5
+DEFAULT_REALM_FOLDER = os.getenv('REALMS_PROJECT_DIR', '/srv/dev1/realms')
 
 
 def get_persona_or_default(persona_name=None):
@@ -71,9 +72,121 @@ db_client = DatabaseClient()
 # Inactivity timeout configuration
 INACTIVITY_TIMEOUT_SECONDS = int(os.getenv('INACTIVITY_TIMEOUT_SECONDS', '3600'))  # Default: one hour
 INACTIVITY_CHECK_INTERVAL_SECONDS = int(os.getenv('INACTIVITY_CHECK_INTERVAL_SECONDS', '60'))
+OLLAMA_READY_TIMEOUT_SECONDS = int(os.getenv('OLLAMA_READY_TIMEOUT_SECONDS', '300'))
 last_activity_time = time.time()
 inactivity_monitor_thread = None
 shutdown_initiated = False
+_ensure_ollama_lock = threading.Lock()
+
+TOOL_STATUS_LABELS = {
+    "realm_status": "Checking realm status…",
+    "fetch_codex": "Loading codex…",
+    "get_proposals": "Fetching proposals…",
+    "get_proposal": "Loading proposal…",
+    "find_objects": "Searching realm records…",
+    "db_get": "Querying realm database…",
+    "db_schema": "Reading database schema…",
+    "get_balance": "Checking token balance…",
+    "get_transactions": "Loading transactions…",
+    "get_vault_status": "Checking vault status…",
+    "get_my_status": "Checking your citizen status…",
+    "search_realm": "Searching realms…",
+    "list_realms": "Listing realms…",
+}
+
+
+def _ollama_think_param():
+    """Return the Ollama `think` parameter for the active model, or None."""
+    model = DEFAULT_LLM_MODEL.lower()
+    if "gpt-oss" in model:
+        return "low"
+    if any(tag in model for tag in ("deepseek-r1", "deepseek-v3", "qwen3")):
+        return True
+    return None
+
+
+def _stream_event(event_type: str, text: str) -> dict:
+    return {"type": event_type, "text": text}
+
+
+def _tool_status_label(tool_name: str) -> str:
+    return TOOL_STATUS_LABELS.get(
+        tool_name,
+        f"Running {tool_name.replace('_', ' ')}…",
+    )
+
+
+def _iter_ollama_stream_events(stream_resp):
+    """Parse Ollama streaming JSON lines into structured SSE events."""
+    for line in stream_resp.iter_lines():
+        if not line:
+            continue
+        try:
+            data = json.loads(line.decode("utf-8"))
+        except ValueError:
+            yield _stream_event("text", "Error: Invalid response from Ollama. The LLM backend may be misconfigured.")
+            return
+        if "error" in data:
+            log(f"Ollama error: {data['error']}")
+            yield _stream_event("text", f"Error: {data['error']}")
+            return
+        msg = data.get("message", {})
+        thinking_chunk = msg.get("thinking") or ""
+        content_chunk = msg.get("content") or ""
+        if thinking_chunk:
+            yield _stream_event("thinking", thinking_chunk)
+        if content_chunk:
+            yield _stream_event("text", content_chunk)
+        if data.get("done", False):
+            break
+
+
+def is_ollama_ready(ollama_url: str) -> bool:
+    """Return True when Ollama responds at the given base URL."""
+    try:
+        resp = requests.get(f"{ollama_url.rstrip('/')}/api/tags", timeout=5)
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
+def ensure_ollama_ready(ollama_url: str) -> tuple[bool, str | None]:
+    """Start the RunPod pod if needed and wait until Ollama is reachable."""
+    if is_ollama_ready(ollama_url):
+        return True, None
+
+    pod_type = os.getenv('POD_TYPE')
+    if not os.getenv('RUNPOD_API_KEY') or not pod_type:
+        return False, "The AI assistant is unavailable right now. Please try again in a few minutes."
+
+    with _ensure_ollama_lock:
+        if is_ollama_ready(ollama_url):
+            return True, None
+
+        log(f"Ollama unreachable at {ollama_url}; starting RunPod pod '{pod_type}'...")
+        try:
+            from pod_manager import PodManager
+            manager = PodManager(verbose=True)
+            if not manager.start_pod(pod_type, deploy_new_if_needed=True):
+                return False, (
+                    "The AI assistant is still waking up and could not start right now. "
+                    "Please try again in a few minutes."
+                )
+        except Exception as e:
+            log(f"Error starting pod: {e}")
+            traceback.print_exc()
+            return False, f"Failed to start the LLM backend: {e}"
+
+        deadline = time.time() + OLLAMA_READY_TIMEOUT_SECONDS
+        while time.time() < deadline:
+            if is_ollama_ready(ollama_url):
+                log("Ollama is ready after pod start")
+                return True, None
+            time.sleep(5)
+
+        return False, (
+            "The AI assistant is still waking up. Please try again in a minute."
+        )
 
 def _prefetch_realm_status(realm_principal: str, network: str = "staging"):
     """Fetch realm status with a short timeout; returns None on failure or timeout."""
@@ -83,12 +196,16 @@ def _prefetch_realm_status(realm_principal: str, network: str = "staging"):
         raw = realm_status(
             network=network,
             realm_principal=realm_principal,
+            realm_folder=DEFAULT_REALM_FOLDER,
             timeout=REALM_STATUS_PREFETCH_TIMEOUT_SECONDS,
             enrich_votes=False,
         )
         parsed = json.loads(raw) if isinstance(raw, str) else raw
-        if isinstance(parsed, dict) and "error" in parsed:
+        if isinstance(parsed, dict) and parsed.get("error"):
             log(f"Could not fetch realm status: {parsed.get('error', 'unknown')}")
+            return None
+        if isinstance(parsed, dict) and parsed.get("success") is False:
+            log(f"Could not fetch realm status: {parsed.get('data', parsed)}")
             return None
         metrics = parsed.get("data", {}).get("status", parsed)
         log(f"Pre-fetched realm status for {realm_principal}")
@@ -566,6 +683,10 @@ def ask():
     if not question:
         return jsonify({"error": "Missing required fields: a question is required"}), 400
 
+    ready, ollama_err = ensure_ollama_ready(ollama_url)
+    if not ready:
+        return jsonify({"error": ollama_err}), 503
+
     # Ensure a chat session record exists for this thread (idempotent). This lets
     # the assistant keep multiple independent conversations per user+realm.
     if conversation_id and user_principal:
@@ -583,11 +704,11 @@ def ask():
                 codex_name = codex.get('name', f'codex_{explain_codex_id}')
                 codex_code = codex.get('code', '# No code available')
                 question = (
-                    f"Explain the governance rules, purpose, and implications of this codex in plain language "
-                    f"that a non-programmer citizen can understand. Do NOT explain the programming syntax or "
-                    f"code structure. Focus on: what rules or policies this codex establishes, what it controls "
-                    f"or automates, how it affects governance and citizens, and any safeguards or conditions it "
-                    f"enforces.\n\nCodex name: \"{codex_name}\"\nCodex code:\n```python\n{codex_code}\n```"
+                    f"Explain what this codex does for the realm in plain language for a non-technical citizen. "
+                    f"Focus on governance rules, purpose, and real-world implications — not programming syntax or code structure. "
+                    f"Describe what policies it establishes, what it controls or automates, how it affects citizens, and any safeguards or conditions. "
+                    f"Avoid technical jargon unless the user explicitly asks for a code-level explanation.\n\n"
+                    f"Codex name: \"{codex_name}\"\nCodex code:\n```python\n{codex_code}\n```"
                 )
                 log(f"Codex explain request for ID {explain_codex_id}: {codex_name}")
             else:
@@ -605,7 +726,7 @@ def ask():
     verbosity = data.get('verbosity', 0)
 
     # Tool calling parameters
-    realm_folder = data.get('realm_folder', '.')
+    realm_folder = data.get('realm_folder', DEFAULT_REALM_FOLDER)
     network = data.get('network', 'staging')
 
     def _log_prompt(prompt_text):
@@ -630,9 +751,13 @@ def ask():
                     persona_name, agent_name, agent_background, agent_id, conversation_id, page_context
                 )
                 _log_prompt(prompt)
+                yield f"data: {json.dumps(_stream_event('status', 'Preparing context…'))}\n\n"
                 for chunk in stream_response_with_tools(ollama_url, prompt, user_principal, realm_principal, question, actual_persona_name, network, realm_folder, agent_id, verbosity, conversation_id):
-                    if chunk:
-                        yield f"data: {json.dumps({'text': chunk})}\n\n"
+                    if not chunk:
+                        continue
+                    if isinstance(chunk, str):
+                        chunk = _stream_event("text", chunk)
+                    yield f"data: {json.dumps(chunk)}\n\n"
                 yield "data: [DONE]\n\n"
             return Response(sse_wrapper(), 
                           mimetype='text/event-stream',
@@ -789,115 +914,77 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
     are needed, content is piped directly to the client token-by-token.
     
     Verbosity levels:
-    - 0: Q&A only (no debug output)
-    - 1: Debug info without stream lines (timestamps included)
-    - 2: Full debug including stream lines (timestamps included)
+    - 0: Q&A only (no status events)
+    - 1: Status events for tool steps and progress (recommended for chat UI)
+    - 2: Full debug including stream lines
     """
-    from datetime import datetime
-    
     def debug(msg, level=1, is_stream_line=False):
-        """Yield debug message if verbosity allows. Returns the message or empty string."""
+        """Return a status event if verbosity allows."""
         if verbosity >= level:
             if is_stream_line and verbosity < 2:
-                return ""
-            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            return f"\n__DEBUG__ [{ts}] {msg}\n"
-        return ""
-    
+                return None
+            return _stream_event("status", msg)
+        return None
+
     def debug_block(label, content, level=1):
-        """Yield multi-line debug block with start/end markers. Returns the block or empty string."""
+        """Return a short status event for multi-line debug blocks."""
         if verbosity >= level:
-            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            return f"\n__DEBUG_START__ [{ts}] {label}\n{content}\n__DEBUG_END__\n"
-        return ""
-    
-    def _stream_ollama(chat_messages, with_tools=False):
-        """Helper: stream an Ollama chat call, yielding (chunk, full_answer) at the end.
-        Yields content chunks as they arrive. Returns full accumulated answer."""
+            return _stream_event("status", label)
+        return None
+
+    def _stream_final(chat_messages):
+        """Stream a final response (no tools) and yield structured events."""
         payload = {
             "model": DEFAULT_LLM_MODEL,
             "messages": chat_messages,
-            "stream": True
+            "stream": True,
         }
-        if with_tools:
-            payload["tools"] = REALM_TOOLS
-        
+        think = _ollama_think_param()
+        if think is not None:
+            payload["think"] = think
         try:
-            resp = requests.post(f"{ollama_url}/api/chat", json=payload, stream=True, timeout=(10, 120))
+            stream_resp = requests.post(
+                f"{ollama_url}/api/chat",
+                json=payload,
+                stream=True,
+                timeout=(10, 120),
+            )
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            yield f"Error: Cannot reach Ollama at {ollama_url}. The LLM backend appears to be offline."
-            return
-        if resp.status_code != 200:
-            yield f"Error: Cannot reach Ollama at {ollama_url} (HTTP {resp.status_code}). The LLM backend appears to be offline or unavailable."
-            return
-        full_answer = ""
-        for line in resp.iter_lines():
-            if not line:
-                continue
-            try:
-                data = json.loads(line.decode('utf-8'))
-            except ValueError:
-                yield f"Error: Invalid response from Ollama. The LLM backend may be misconfigured."
-                return
-            if 'error' in data:
-                log(f"Ollama error: {data['error']}")
-                yield f"Error: {data['error']}"
-                return
-            if 'message' in data and 'content' in data['message']:
-                chunk = data['message']['content']
-                full_answer += chunk
-                yield chunk
-            if data.get('done', False):
-                break
-        return full_answer
-    
-    def _stream_final(chat_messages):
-        """Stream a final response (no tools) and yield content chunks. Returns full answer."""
-        try:
-            stream_resp = requests.post(f"{ollama_url}/api/chat", json={
-                "model": DEFAULT_LLM_MODEL,
-                "messages": chat_messages,
-                "stream": True
-            }, stream=True, timeout=(10, 120))
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            yield f"Error: Cannot reach Ollama at {ollama_url}. The LLM backend appears to be offline."
+            yield _stream_event("text", f"Error: Cannot reach Ollama at {ollama_url}. The LLM backend appears to be offline.")
             return
         if stream_resp.status_code != 200:
-            yield f"Error: Cannot reach Ollama at {ollama_url} (HTTP {stream_resp.status_code}). The LLM backend appears to be offline or unavailable."
+            yield _stream_event(
+                "text",
+                f"Error: Cannot reach Ollama at {ollama_url} (HTTP {stream_resp.status_code}). "
+                "The LLM backend appears to be offline or unavailable.",
+            )
             return
         full = ""
-        for line in stream_resp.iter_lines():
-            if not line:
-                continue
-            try:
-                data = json.loads(line.decode('utf-8'))
-            except ValueError:
-                yield f"Error: Invalid response from Ollama. The LLM backend may be misconfigured."
-                return
-            if 'error' in data:
-                log(f"Ollama error: {data['error']}")
-                yield f"Error: {data['error']}"
-                return
-            chunk = data.get('message', {}).get('content', '')
-            if chunk:
-                full += chunk
-                yield chunk
-            if data.get('done', False):
-                break
-        save_to_conversation(user_principal, realm_principal, question, full, prompt, persona_name, agent_id, conversation_id=conversation_id)
-    
+        for event in _iter_ollama_stream_events(stream_resp):
+            if event["type"] == "text":
+                full += event["text"]
+            yield event
+        save_to_conversation(
+            user_principal, realm_principal, question, full, prompt,
+            persona_name, agent_id, conversation_id=conversation_id,
+        )
+
     try:
         messages = [
             {"role": "system", "content": prompt},
             {"role": "user", "content": question}
         ]
-        
-        # Quick non-streaming call WITH tools to check if tools are needed
-        log("Checking for tool calls (non-streaming)...")
-        dbg = debug("Checking for tool calls...")
+
+        dbg = debug("Analyzing your question…")
         if dbg:
             yield dbg
-        
+
+        # Quick non-streaming call WITH tools to check if tools are needed
+        log("Checking for tool calls (non-streaming)...")
+        dbg = debug("Checking if realm tools are needed…")
+        if dbg:
+            yield dbg
+
         try:
             check_response = requests.post(f"{ollama_url}/api/chat", json={
                 "model": DEFAULT_LLM_MODEL,
@@ -906,68 +993,59 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
                 "stream": False
             }, timeout=(10, 120))
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            yield f"Error: Cannot reach Ollama at {ollama_url}. The LLM backend appears to be offline."
+            yield _stream_event("text", f"Error: Cannot reach Ollama at {ollama_url}. The LLM backend appears to be offline.")
             return
         if check_response.status_code != 200:
-            yield f"Error: Cannot reach Ollama at {ollama_url} (HTTP {check_response.status_code}). The LLM backend appears to be offline or unavailable."
+            yield _stream_event(
+                "text",
+                f"Error: Cannot reach Ollama at {ollama_url} (HTTP {check_response.status_code}). "
+                "The LLM backend appears to be offline or unavailable.",
+            )
             return
-        
+
         try:
             result = check_response.json()
         except ValueError:
-            yield f"Error: Invalid response from Ollama. The LLM backend may be misconfigured."
+            yield _stream_event("text", "Error: Invalid response from Ollama. The LLM backend may be misconfigured.")
             return
         assistant_message = result.get('message', {})
         messages.append(assistant_message)
-        
+
         # If no tool calls needed, stream a fresh response WITHOUT tools (avoids thinking overhead)
         if not assistant_message.get('tool_calls'):
             log("No tools needed, streaming response without tools...")
-            dbg = debug("No tools needed, streaming response...")
+            dbg = debug("Composing answer…")
             if dbg:
                 yield dbg
             yield from _stream_final(messages[:2])  # Only system + user messages
             return
-        
+
         # Tool execution loop
         max_iterations = 10
         iteration = 0
-        
+
         while assistant_message.get('tool_calls') and iteration < max_iterations:
             iteration += 1
             log(f"Tool execution iteration {iteration}")
-            dbg = debug(f"Tool execution iteration {iteration}")
-            if dbg:
-                yield dbg
-            
+
             for tool_call in assistant_message['tool_calls']:
                 tool_name = tool_call['function']['name']
                 tool_args = tool_call['function']['arguments']
-                
+
                 log(f"Executing tool: {tool_name} with args: {tool_args}")
-                dbg = debug(f"Executing tool: {tool_name} with args: {tool_args}")
+                dbg = debug(_tool_status_label(tool_name))
                 if dbg:
                     yield dbg
-                
+
                 tool_result = execute_tool(tool_name, tool_args, network=network, realm_folder=realm_folder, realm_principal=realm_principal, user_principal=user_principal)
-                
+
                 log(f"Tool result: {tool_result[:500]}..." if len(tool_result) > 500 else f"Tool result: {tool_result}")
-                try:
-                    pretty_result = json.dumps(json.loads(tool_result), indent=2)
-                except:
-                    pretty_result = tool_result
-                dbg = debug_block(f"Tool result ({tool_name})", pretty_result[:1000] if len(pretty_result) > 1000 else pretty_result)
-                if dbg:
-                    yield dbg
-                
                 messages.append({"role": "tool", "content": tool_result})
-            
-            # Check if more tool calls are needed (non-streaming)
-            log(f"Checking for additional tool calls (iteration {iteration})...")
-            dbg = debug(f"Checking for additional tool calls (iteration {iteration})...")
+
+            dbg = debug("Processing tool results…")
             if dbg:
                 yield dbg
-            
+
             try:
                 check_response = requests.post(f"{ollama_url}/api/chat", json={
                     "model": DEFAULT_LLM_MODEL,
@@ -976,41 +1054,43 @@ def stream_response_with_tools(ollama_url, prompt, user_principal, realm_princip
                     "stream": False
                 }, timeout=(10, 120))
             except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-                yield f"Error: Cannot reach Ollama at {ollama_url}. The LLM backend appears to be offline."
+                yield _stream_event("text", f"Error: Cannot reach Ollama at {ollama_url}. The LLM backend appears to be offline.")
                 return
             if check_response.status_code != 200:
-                yield f"Error: Cannot reach Ollama at {ollama_url} (HTTP {check_response.status_code}). The LLM backend appears to be offline or unavailable."
+                yield _stream_event(
+                    "text",
+                    f"Error: Cannot reach Ollama at {ollama_url} (HTTP {check_response.status_code}). "
+                    "The LLM backend appears to be offline or unavailable.",
+                )
                 return
-            
+
             try:
                 result = check_response.json()
             except ValueError:
-                yield f"Error: Invalid response from Ollama. The LLM backend may be misconfigured."
+                yield _stream_event("text", "Error: Invalid response from Ollama. The LLM backend may be misconfigured.")
                 return
             assistant_message = result.get('message', {})
             messages.append(assistant_message)
-            
+
             if not assistant_message.get('tool_calls'):
                 break
-        
-        # Stream the final response after tool execution (without tools to avoid thinking overhead)
+
         final_content = assistant_message.get('content', '')
         if final_content:
             log(f"Final answer from tool loop: {final_content[:100]}...")
-            yield final_content
+            yield _stream_event("text", final_content)
             save_to_conversation(user_principal, realm_principal, question, final_content, prompt, persona_name, agent_id, conversation_id=conversation_id)
         else:
             log("Streaming final response after tools...")
-            dbg = debug(f"Streaming final response after tools ({len(messages)} messages)")
+            dbg = debug("Composing answer…")
             if dbg:
                 yield dbg
-            # Remove empty assistant message, stream without tools
             final_messages = messages[:-1] if not assistant_message.get('content') else messages
             yield from _stream_final(final_messages)
-                            
+
     except Exception as e:
         log(f"Error in stream_response_with_tools: {traceback.format_exc()}")
-        yield f"Error: {str(e)}"
+        yield _stream_event("text", f"Error: {str(e)}")
 
 @app.route('/suggestions', methods=['GET'])
 def get_suggestions():

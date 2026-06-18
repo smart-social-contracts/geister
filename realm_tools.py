@@ -497,7 +497,14 @@ def get_my_principal(network: str = "staging", realm_folder: str = ".", realm_pr
 # Realm Status Tools
 # =============================================================================
 
-def realm_status(network: str = "staging", realm_folder: str = ".", realm_principal: str = "", identity: str = "") -> str:
+def realm_status(
+    network: str = "staging",
+    realm_folder: str = ".",
+    realm_principal: str = "",
+    identity: str = "",
+    timeout: int = 60,
+    enrich_votes: bool = True,
+) -> str:
     """Get the current status of the realm (users, proposals, votes, extensions)."""
     status_raw = _run_dfx_call(
         canister="realm_backend",
@@ -506,9 +513,12 @@ def realm_status(network: str = "staging", realm_folder: str = ".", realm_princi
         network=network,
         realm_folder=realm_folder,
         realm_principal=realm_principal,
-        identity=identity
+        identity=identity,
+        timeout=timeout,
     )
     # Enrich status with vote tallies (canister status doesn't include them)
+    if not enrich_votes:
+        return status_raw
     try:
         status_data = json.loads(status_raw) if isinstance(status_raw, str) else status_raw
         proposals_raw = get_proposals(network=network, realm_folder=realm_folder, identity=identity, realm_principal=realm_principal)
