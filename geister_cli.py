@@ -643,7 +643,11 @@ def agent_inspect(
 @pod_app.command("start")
 def pod_start(
     pod_type: str = typer.Argument("main", help="Pod type (main or branch)"),
-    deploy_new: bool = typer.Option(False, "--deploy-new", help="Deploy new pod if needed"),
+    deploy_new: bool = typer.Option(
+        False,
+        "--deploy-new",
+        help="Deploy a new pod if none exists or resume fails on the original GPU host",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     max_gpu_price: Optional[float] = typer.Option(None, "--max-gpu-price", help="Maximum GPU price per hour"),
 ):
@@ -681,7 +685,11 @@ def pod_status(
 @pod_app.command("restart")
 def pod_restart(
     pod_type: str = typer.Argument("main", help="Pod type (main or branch)"),
-    deploy_new: bool = typer.Option(False, "--deploy-new", help="Deploy new pod if needed"),
+    deploy_new: bool = typer.Option(
+        False,
+        "--deploy-new",
+        help="Deploy a new pod if none exists or resume fails on the original GPU host",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """Restart a RunPod instance."""

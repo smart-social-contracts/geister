@@ -20,6 +20,10 @@ import requests
 from pathlib import Path
 from typing import Dict, Optional, List, Any
 
+RESUME_MAX_ATTEMPTS = int(os.getenv('POD_RESUME_MAX_ATTEMPTS', '6'))
+RESUME_RETRY_DELAY_SECONDS = int(os.getenv('POD_RESUME_RETRY_DELAY_SECONDS', '30'))
+ORIGINAL_HOST_GPU_UNAVAILABLE = "not enough free gpus on the host machine"
+
 
 class PodManager:
     def __init__(self, verbose: bool = False, max_gpu_price: float = None, min_gpu_price: float = None, gpu_count: int = 1):
@@ -181,9 +185,82 @@ class PodManager:
             time.sleep(5)
         
         return False
+
+    @staticmethod
+    def _is_original_host_gpu_unavailable(error: Exception) -> bool:
+        return ORIGINAL_HOST_GPU_UNAVAILABLE in str(error).lower()
+
+    def _terminate_pod_by_id(self, pod_id: str) -> bool:
+        """Terminate (delete) a pod by ID."""
+        try:
+            result = runpod.terminate_pod(pod_id)
+            if self.verbose:
+                self._print(f"🔍 Terminate result: {result}")
+            self._print(f"✅ Pod {pod_id} terminated successfully!")
+            return True
+        except Exception as e:
+            self._print(f"❌ Termination failed for pod {pod_id}: {e}", force=True)
+            traceback.print_exc()
+            return False
+
+    def _fallback_deploy_new_pod(self, pod_type: str, old_pod_id: str) -> bool:
+        """Replace an unresumable pod with a new deployment on an available GPU host."""
+        self._print(
+            f"Resume failed for {old_pod_id}; terminating and deploying a new {pod_type} pod..."
+        )
+        if not self._terminate_pod_by_id(old_pod_id):
+            self._print("⚠️ Could not terminate old pod; attempting deploy anyway...", force=True)
+        return self.deploy_pod(pod_type)
+
+    def _resume_existing_pod(self, pod_id: str) -> bool:
+        """Resume a stopped pod, retrying when the original GPU host is temporarily unavailable."""
+        gpu_count = int(self.config.get('GPU_COUNT', '1'))
+
+        for attempt in range(1, RESUME_MAX_ATTEMPTS + 1):
+            self._print(f"Resuming pod {pod_id} (attempt {attempt}/{RESUME_MAX_ATTEMPTS})...")
+            try:
+                result = runpod.resume_pod(pod_id=pod_id, gpu_count=gpu_count)
+                if self.verbose:
+                    self._print(f"🔍 Start result: {result}")
+
+                self._print("Start command sent. Waiting for pod to start...")
+                if self.wait_for_status(pod_id, ["RUNNING"]):
+                    self._print("✅ Pod is now running successfully!")
+                    if not self.verbose:
+                        print("RUNNING")
+                    return True
+
+                self._print("❌ Pod did not reach RUNNING status in time", force=True)
+            except Exception as e:
+                self._print(f"❌ Resume failed: {e}", force=True)
+                traceback.print_exc()
+                if self._is_original_host_gpu_unavailable(e):
+                    self._print(
+                        "Original GPU host has no free GPUs; skipping further resume attempts.",
+                        force=True,
+                    )
+                    return False
+
+            if attempt < RESUME_MAX_ATTEMPTS:
+                self._print(
+                    f"Original GPU may be busy; retrying in {RESUME_RETRY_DELAY_SECONDS}s..."
+                )
+                time.sleep(RESUME_RETRY_DELAY_SECONDS)
+
+        self._print(
+            "❌ Could not resume pod after "
+            f"{RESUME_MAX_ATTEMPTS} attempts. The original GPU host may still be occupied.",
+            force=True,
+        )
+        return False
     
     def start_pod(self, pod_type: str, deploy_new_if_needed: bool = False) -> bool:
-        """Start a pod using RunPod SDK"""
+        """Start a pod using RunPod SDK.
+
+        When an existing stopped pod is found, resume it (with retries). If resume fails
+        and deploy_new_if_needed is True, the old pod is terminated and a new pod is
+        deployed on an available GPU host. A new pod is also deployed when no pod exists.
+        """
         self._print(f"Starting {pod_type} pod...")
         
         # Find existing pod by name pattern
@@ -218,36 +295,11 @@ class PodManager:
                 self._print("❌ Pod not found and deploy_new_if_needed is False", force=True)
                 return False
         
-        # Start the pod using RunPod SDK
-        self._print(f"Starting pod {pod_id}...")
-        try:
-            gpu_count = int(self.config.get('GPU_COUNT', '1'))
-            result = runpod.resume_pod(pod_id=pod_id, gpu_count=gpu_count)
-            if self.verbose:
-                self._print(f"🔍 Start result: {result}")
-            
-            self._print("Start command sent. Waiting for pod to start...")
-            
-            if self.wait_for_status(pod_id, ["RUNNING"]):
-                self._print("✅ Pod is now running successfully!")
-                if not self.verbose:
-                    print("RUNNING")
-                return True
-            else:
-                self._print("❌ Pod failed to start", force=True)
-                if deploy_new_if_needed:
-                    self._print("Pod failed to start, attempting to deploy a new pod...")
-                    return self.deploy_pod(pod_type)
-                return False
-                
-        except Exception as e:
-            self._print(f"❌ Start failed: {e}", force=True)
-            traceback.print_exc()
-            if deploy_new_if_needed:
-                self._print("Start command failed, terminating current pod and attempting to deploy a new pod...")
-                self.terminate_pod(pod_type)
-                return self.deploy_pod(pod_type)
-            return False
+        if self._resume_existing_pod(pod_id):
+            return True
+        if deploy_new_if_needed:
+            return self._fallback_deploy_new_pod(pod_type, pod_id)
+        return False
     
     def stop_pod(self, pod_type: str) -> bool:
         """Stop a pod using RunPod SDK"""
@@ -525,12 +577,8 @@ class PodManager:
             self._print(f"Pod ID: {pod_id}")
             self._print(f"Server Host: {pod_url}")
             
-            # Delete the pod using RunPod SDK
-            result = runpod.terminate_pod(pod_id)
-            if self.verbose:
-                self._print(f"🔍 Terminate result: {result}")
-            
-            self._print(f"✅ Pod {pod_id} terminated successfully!")
+            if not self._terminate_pod_by_id(pod_id):
+                return False
             if not self.verbose:
                 print("TERMINATED")
             return True
@@ -808,7 +856,7 @@ API Usage Examples:
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Enable verbose output (default: concise)')
     parser.add_argument('--deploy-new-if-needed', action='store_true',
-                       help='Deploy a new pod if current one cannot be started (for start/restart only)')
+                       help='Deploy a new pod if none exists or resume fails on the original GPU host')
     parser.add_argument('--question', '-q', type=str,
                        help='Question to ask Ashoka (for ask action)')
     parser.add_argument('--question-file', '-qf', type=str,
