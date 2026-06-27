@@ -210,8 +210,8 @@ def ensure_ollama_ready(ollama_url: str) -> tuple[bool, str | None]:
             manager = PodManager(verbose=True)
             if not manager.start_pod(pod_type, deploy_new_if_needed=True):
                 return False, (
-                    "The AI assistant is still waking up and could not start right now. "
-                    "Please try again in a few minutes."
+                    "The AI assistant could not resume its GPU pod yet — the original "
+                    "machine may be busy. Please try again in a few minutes."
                 )
         except Exception as e:
             log(f"Error starting pod: {e}")
@@ -681,35 +681,30 @@ def update_activity():
     log(f"Activity updated at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_activity_time))}")
 
 def monitor_inactivity():
-    """Background thread to monitor inactivity and exit script if timeout reached"""
-    global shutdown_initiated
-    
+    """Background thread to stop the RunPod GPU pod after inactivity timeout."""
+    global shutdown_initiated, last_activity_time
+
     while not shutdown_initiated:
         try:
-            time.sleep(INACTIVITY_CHECK_INTERVAL_SECONDS)  # Check every minute
-            
+            time.sleep(INACTIVITY_CHECK_INTERVAL_SECONDS)
+
             if shutdown_initiated:
                 break
-                
+
             current_time = time.time()
             inactive_duration = current_time - last_activity_time
-            
+
             log(f"Inactivity check: {inactive_duration:.0f}s since last activity (timeout: {INACTIVITY_TIMEOUT_SECONDS}s)")
-            
+
             if INACTIVITY_TIMEOUT_SECONDS > 0 and inactive_duration >= INACTIVITY_TIMEOUT_SECONDS:
                 log(f"⚠️  INACTIVITY TIMEOUT REACHED! Inactive for {inactive_duration:.0f} seconds")
-                log("🛑 Exiting Python script due to inactivity...")
-                
-                # Exit the monitoring thread and the entire script
-                shutdown_initiated = True
+                log("🛑 Stopping RunPod pod due to inactivity timeout...")
 
-                # Stop this pod using pod_manager directly
                 try:
-                    log("🛑 Stopping pod due to inactivity timeout...")
                     from pod_manager import PodManager
                     pod_manager = PodManager(verbose=True)
                     success = pod_manager.stop_pod(os.getenv('POD_TYPE'))
-                    
+
                     if success:
                         log("✅ Pod stopped successfully")
                     else:
@@ -717,6 +712,9 @@ def monitor_inactivity():
                 except Exception as e:
                     log(f"❌ Error stopping pod: {e}")
                     traceback.print_exc()
+
+                # Reset timer so we wait another full timeout before retrying (keeps monitor alive)
+                last_activity_time = time.time()
                 
         except Exception as e:
             log(f"Error in inactivity monitor: {e}")
@@ -857,6 +855,7 @@ def ask():
                     network, realm_folder, agent_id, verbosity, conversation_id,
                     focused_proposal_id=focused_proposal_id,
                     proposal_prefetched=bool(proposal_context_section),
+                    has_prefetched_realm_context=bool(fetched_realm_status),
                 ):
                     if not chunk:
                         continue
@@ -1026,6 +1025,7 @@ def stream_response_with_tools(
     conversation_id=None,
     focused_proposal_id=None,
     proposal_prefetched=False,
+    has_prefetched_realm_context=False,
 ):
     """Generator function for streaming responses with tool calling support.
     
@@ -1052,6 +1052,16 @@ def stream_response_with_tools(
             return _stream_event("status", label)
         return None
 
+    def _yield_while_waiting(thread, labels):
+        """Keep the SSE stream alive with rotating status text while thread runs."""
+        idx = 0
+        while thread.is_alive():
+            dbg = debug(labels[idx % len(labels)])
+            if dbg:
+                yield dbg
+            idx += 1
+            thread.join(timeout=1.2)
+
     def _stream_final(chat_messages):
         """Stream a final response (no tools) and yield structured events."""
         payload = {
@@ -1062,15 +1072,38 @@ def stream_response_with_tools(
         think = _ollama_think_param()
         if think is not None:
             payload["think"] = think
-        try:
-            stream_resp = requests.post(
-                f"{ollama_url}/api/chat",
-                json=payload,
-                stream=True,
-                timeout=(10, 120),
-            )
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            yield _stream_event("text", f"Error: Cannot reach Ollama at {ollama_url}. The LLM backend appears to be offline.")
+
+        connect_result = {}
+
+        def _connect():
+            try:
+                connect_result["resp"] = requests.post(
+                    f"{ollama_url}/api/chat",
+                    json=payload,
+                    stream=True,
+                    timeout=(10, 120),
+                )
+            except Exception as exc:
+                connect_result["error"] = exc
+
+        connect_thread = threading.Thread(target=_connect, daemon=True)
+        connect_thread.start()
+        yield from _yield_while_waiting(
+            connect_thread,
+            ["Writing answer…", "Writing answer…", "Still writing…"],
+        )
+
+        if "error" in connect_result:
+            exc = connect_result["error"]
+            if isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
+                yield _stream_event("text", f"Error: Cannot reach Ollama at {ollama_url}. The LLM backend appears to be offline.")
+            else:
+                yield _stream_event("text", f"Error contacting LLM: {exc}")
+            return
+
+        stream_resp = connect_result.get("resp")
+        if stream_resp is None:
+            yield _stream_event("text", "Error: No response from Ollama.")
             return
         if stream_resp.status_code != 200:
             yield _stream_event(
@@ -1089,6 +1122,34 @@ def stream_response_with_tools(
             persona_name, agent_id, conversation_id=conversation_id,
         )
 
+    # Keywords that suggest realm context is needed → tool-check required.
+    # Questions without any of these are treated as conversational and skip
+    # the non-streaming tool-check, going straight to streaming.
+    # Only run the expensive tool-check when live data is likely needed beyond
+    # what we already prefetched into the prompt.
+    _LIVE_TOOL_KEYWORDS = frozenset([
+        'proposal', 'vote', 'voting', 'codex', 'balance', 'transaction',
+        'vault', 'cast vote', 'my vote', 'my status', 'search realm',
+        'find object', 'db schema', 'fetch codex',
+    ])
+    _GENERAL_REALM_KEYWORDS = frozenset([
+        'member', 'citizen', 'treasury', 'governance', 'realm', 'extension',
+        'token', 'wallet', 'department', 'organization', 'mandate',
+        'describe', 'explain', 'status', 'budget', 'fund', 'how many',
+        'show me', 'tell me', 'what is', "what's", 'who are', 'list',
+        'summarize', 'summary', 'overview',
+    ])
+
+    def _needs_tool_check(q: str) -> bool:
+        if focused_proposal_id:
+            return True
+        ql = q.lower()
+        if any(kw in ql for kw in _LIVE_TOOL_KEYWORDS):
+            return True
+        if has_prefetched_realm_context:
+            return False
+        return any(kw in ql for kw in _GENERAL_REALM_KEYWORDS)
+
     try:
         messages = [
             {"role": "system", "content": prompt},
@@ -1102,27 +1163,46 @@ def stream_response_with_tools(
         if dbg:
             yield dbg
 
-        # Quick non-streaming call WITH tools to check if tools are needed
-        log("Checking for tool calls (non-streaming)...")
-        if proposal_prefetched and focused_proposal_id:
-            dbg = debug(f"Composing answer from proposal ({focused_proposal_id})…")
-        elif focused_proposal_id:
-            dbg = debug(_proposal_fetch_status(focused_proposal_id))
-        else:
-            dbg = debug("Checking if realm tools are needed…")
-        if dbg:
-            yield dbg
-
-        try:
-            check_response = requests.post(f"{ollama_url}/api/chat", json={
-                "model": DEFAULT_LLM_MODEL,
-                "messages": messages,
-                "tools": REALM_TOOLS,
-                "stream": False
-            }, timeout=(10, 120))
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            yield _stream_event("text", f"Error: Cannot reach Ollama at {ollama_url}. The LLM backend appears to be offline.")
+        # Skip tool-check when prefetched context is enough, or for chit-chat.
+        if not _needs_tool_check(question):
+            log("Skipping tool check — streaming directly.")
+            yield from _stream_final(messages)
             return
+
+        # Non-streaming tool-check (gpt-oss:20b returns empty with stream+tools).
+        # Run it in a thread so we can keep yielding animated dots while waiting,
+        # avoiding any silent pause in the SSE stream.
+        log("Checking for tool calls (non-streaming, threaded)...")
+        _check_result = {}
+
+        def _run_tool_check():
+            try:
+                resp = requests.post(f"{ollama_url}/api/chat", json={
+                    "model": DEFAULT_LLM_MODEL,
+                    "messages": messages,
+                    "tools": REALM_TOOLS,
+                    "stream": False,
+                }, timeout=(10, 120))
+                _check_result['response'] = resp
+            except Exception as exc:
+                _check_result['error'] = exc
+
+        _check_thread = threading.Thread(target=_run_tool_check, daemon=True)
+        _check_thread.start()
+        yield from _yield_while_waiting(
+            _check_thread,
+            ["Thinking…", "Thinking…", "Still thinking…"],
+        )
+
+        if 'error' in _check_result:
+            exc = _check_result['error']
+            if isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
+                yield _stream_event("text", f"Error: Cannot reach Ollama at {ollama_url}. The LLM backend appears to be offline.")
+            else:
+                yield _stream_event("text", f"Error contacting LLM: {exc}")
+            return
+
+        check_response = _check_result['response']
         if check_response.status_code != 200:
             yield _stream_event(
                 "text",
@@ -1139,12 +1219,17 @@ def stream_response_with_tools(
         assistant_message = result.get('message', {})
         messages.append(assistant_message)
 
-        # If no tool calls needed, stream a fresh response WITHOUT tools (avoids thinking overhead)
         if not assistant_message.get('tool_calls'):
+            direct_content = (assistant_message.get('content') or '').strip()
+            if direct_content:
+                log("No tools needed — using tool-check response directly.")
+                yield _stream_event("text", direct_content)
+                save_to_conversation(
+                    user_principal, realm_principal, question, direct_content, prompt,
+                    persona_name, agent_id, conversation_id=conversation_id,
+                )
+                return
             log("No tools needed, streaming response without tools...")
-            dbg = debug("Composing answer…")
-            if dbg:
-                yield dbg
             yield from _stream_final(messages[:2])  # Only system + user messages
             return
 
