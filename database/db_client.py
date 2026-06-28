@@ -29,14 +29,19 @@ class DatabaseClient:
     def store_conversation(self, user_principal: str, realm_principal: str, 
                           question: str, response: str, prompt_context: str = None,
                           metadata: Dict = None, persona_name: str = 'ashoka',
-                          agent_id: str = None, conversation_id: str = None) -> int:
+                          agent_id: str = None, conversation_id: str = None,
+                          context_realm: str = None) -> int:
+        # The assistant is user-scoped; the realm is optional CONTEXT (#233).
+        # `context_realm` defaults to `realm_principal` for backward-compatible callers.
+        if context_realm is None:
+            context_realm = realm_principal or None
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute("""
-                    INSERT INTO conversations (user_principal, agent_id, realm_principal, conversation_id, question, response, persona_name, prompt_context, metadata)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO conversations (user_principal, agent_id, realm_principal, context_realm, conversation_id, question, response, persona_name, prompt_context, metadata)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
-                """, (user_principal, agent_id, realm_principal, conversation_id, question, response, persona_name, prompt_context, json.dumps(metadata) if metadata else None))
+                """, (user_principal, agent_id, realm_principal, context_realm, conversation_id, question, response, persona_name, prompt_context, json.dumps(metadata) if metadata else None))
                 
                 row_id = cursor.fetchone()[0]
                 self.connection.commit()
@@ -53,16 +58,22 @@ class DatabaseClient:
 
     def create_chat_session(self, conversation_id: str, user_principal: str,
                             realm_principal: str, persona_name: str = 'ashoka',
-                            title: str = None) -> Dict:
-        """Create a new chat session thread. Idempotent on conversation_id."""
+                            title: str = None, context_realm: str = None) -> Dict:
+        """Create a new chat session thread. Idempotent on conversation_id.
+
+        The thread is owned by the user; `context_realm` is the optional realm it
+        was started in (NULL = general mode). Defaults to `realm_principal`.
+        """
+        if context_realm is None:
+            context_realm = realm_principal or None
         try:
             with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
                 cursor.execute("""
-                    INSERT INTO chat_sessions (conversation_id, user_principal, realm_principal, persona_name, title)
-                    VALUES (%s, %s, %s, %s, %s)
+                    INSERT INTO chat_sessions (conversation_id, user_principal, realm_principal, context_realm, persona_name, title)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (conversation_id) DO NOTHING
-                    RETURNING conversation_id, user_principal, realm_principal, persona_name, title, created_at, updated_at
-                """, (conversation_id, user_principal, realm_principal, persona_name, title))
+                    RETURNING conversation_id, user_principal, realm_principal, context_realm, persona_name, title, created_at, updated_at
+                """, (conversation_id, user_principal, realm_principal, context_realm, persona_name, title))
                 row = cursor.fetchone()
                 self.connection.commit()
                 if row:
@@ -73,21 +84,38 @@ class DatabaseClient:
             self.connection.rollback()
             raise
 
-    def list_chat_sessions(self, user_principal: str, realm_principal: str,
+    def list_chat_sessions(self, user_principal: str, context_realm: str = None,
                            limit: int = 50) -> List[Dict]:
-        """List chat session threads for a user within a realm, newest first."""
+        """List a user's chat session threads, newest first (#233).
+
+        The assistant is user-scoped, so threads are listed BY USER across all
+        realms + the registry. `context_realm` is an OPTIONAL filter:
+          - None (default): every thread the user owns (global inbox).
+          - a realm id: only threads started in that realm's context.
+        Accepts the legacy `realm_principal` value transparently (it matches
+        `context_realm` for backfilled rows).
+        """
         try:
             with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute("""
+                conditions = ["cs.user_principal = %s"]
+                params: list = [user_principal]
+                if context_realm:
+                    # Match either the new context_realm or the legacy realm_principal
+                    # so callers passing the old field still scope correctly.
+                    conditions.append("(cs.context_realm = %s OR cs.realm_principal = %s)")
+                    params.extend([context_realm, context_realm])
+                params.append(limit)
+                cursor.execute(f"""
                     SELECT cs.conversation_id, cs.title, cs.persona_name,
+                           cs.context_realm, cs.realm_principal,
                            cs.created_at, cs.updated_at,
                            (SELECT COUNT(*) FROM conversations c
                               WHERE c.conversation_id = cs.conversation_id) AS message_count
                     FROM chat_sessions cs
-                    WHERE cs.user_principal = %s AND cs.realm_principal = %s
+                    WHERE {' AND '.join(conditions)}
                     ORDER BY cs.updated_at DESC
                     LIMIT %s
-                """, (user_principal, realm_principal, limit))
+                """, params)
                 return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"Failed to list chat sessions: {e}")
@@ -188,12 +216,18 @@ class DatabaseClient:
             logger.error(f"Failed to get conversations by user: {e}")
             return []
     
-    def get_conversation_history(self, user_principal: str, realm_principal: str, persona_name: str = None, agent_id: str = None, conversation_id: str = None) -> List[Dict]:
-        """Get conversation history for a specific user+agent pair, optionally filtered by realm, persona and thread.
+    def get_conversation_history(self, user_principal: str, realm_principal: str = None, persona_name: str = None, agent_id: str = None, conversation_id: str = None, context_realm: str = None) -> List[Dict]:
+        """Get conversation history for a user, optionally filtered by realm, persona and thread.
 
-        When conversation_id is provided, history is scoped to that single thread, which
-        lets a user keep multiple independent conversations with the assistant.
+        User-scoped (#233): history is owned by the user. The realm is an OPTIONAL
+        filter — when neither `realm_principal` nor `context_realm` is given, history
+        aggregates across ALL of the user's realms + general-mode chats.
+
+        When `conversation_id` is provided, history is scoped to that single thread
+        (realm-independent), letting a user keep multiple independent conversations.
         """
+        # Prefer the explicit context_realm; fall back to the legacy realm_principal.
+        realm_filter = context_realm or realm_principal
         try:
             with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
                 # Build query based on provided filters
@@ -208,9 +242,10 @@ class DatabaseClient:
                     conditions.append("agent_id = %s")
                     params.append(agent_id)
                 
-                if realm_principal:
-                    conditions.append("realm_principal = %s")
-                    params.append(realm_principal)
+                if realm_filter:
+                    # Match new context_realm or legacy realm_principal column.
+                    conditions.append("(context_realm = %s OR realm_principal = %s)")
+                    params.extend([realm_filter, realm_filter])
                 
                 if persona_name:
                     conditions.append("persona_name = %s")

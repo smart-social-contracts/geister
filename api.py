@@ -287,7 +287,30 @@ def build_structured_realm_context(realm_status):
     licenses_count = to_int(metrics.get('licenses_count', 0))
     trades_count = to_int(metrics.get('trades_count', 0))
     realms_count = to_int(metrics.get('realms_count', 0))
-    
+
+    # Federation / horizontal-scaling topology. The backend status endpoint
+    # reports the quarter directory; the capital entry is the one whose
+    # canister id matches the realm we queried (index 0). NOTE: the Candid
+    # QuarterInfoRecord does not carry an is_capital flag, so we identify the
+    # capital by canister id / index rather than a per-entry flag.
+    quarters = metrics.get('quarters', []) or []
+    if not isinstance(quarters, list):
+        quarters = []
+    quarters = [q for q in quarters if isinstance(q, dict)]
+    is_quarter = bool(metrics.get('is_quarter', False))
+    parent_realm_canister_id = metrics.get('parent_realm_canister_id', '') or ''
+    capital_cid = realm_status.get('realm_principal', '') or ''
+
+    def _is_capital_entry(q):
+        cid = q.get('canister_id', '') or ''
+        if capital_cid and cid:
+            return cid == capital_cid
+        return to_int(q.get('index', 0)) == 0
+
+    sub_quarters = [q for q in quarters if not _is_capital_entry(q)]
+    quarters_count = len(sub_quarters)
+    federation_population = sum(to_int(q.get('population', 0)) for q in quarters)
+
     extensions = metrics.get('extensions', [])
     realm_name = metrics.get('realm_name', 'Unnamed Realm')
     version = metrics.get('version', 'Unknown')
@@ -355,7 +378,36 @@ Last Updated: {last_updated}
 === OPERATIONAL METRICS ===
 • Tasks: {tasks_count}
 • Total Operations: {total_operational_activity}"""
-    
+
+    # Federation / quarters: describe horizontal-scaling topology so the
+    # assistant can answer "how many quarters does this realm have?" directly.
+    if is_quarter:
+        federation_role = "Quarter (a leaf member of a federation)"
+    elif quarters_count > 0:
+        federation_role = "Capital (coordinator of a federation)"
+    else:
+        federation_role = "Standalone realm (no quarters)"
+
+    context += f"""
+
+=== FEDERATION / QUARTERS ===
+• Role: {federation_role}
+• Number of quarters (excluding the capital): {quarters_count}"""
+    if is_quarter and parent_realm_canister_id:
+        context += f"\n• Capital (parent) canister: {parent_realm_canister_id}"
+    # Only the capital coordinates a directory; a leaf quarter would just list
+    # itself (the backend labels a leaf's own entry "Capital"), which is noise.
+    if quarters and not is_quarter:
+        context += f"\n• Total population across the federation: {federation_population}"
+        context += "\n• Quarter directory:"
+        for q in quarters:
+            q_label = "Capital" if _is_capital_entry(q) else f"Quarter #{to_int(q.get('index', 0))}"
+            q_name = q.get('name', '') or 'Unnamed'
+            q_cid = q.get('canister_id', '') or 'unknown'
+            q_pop = to_int(q.get('population', 0))
+            q_status = q.get('status', 'active') or 'active'
+            context += f"\n  - {q_label}: {q_name} ({q_cid}) — {q_pop} users, {q_status}"
+
     # Add extension details
     if extensions:
         context += "\n\n=== INSTALLED EXTENSIONS ==="
@@ -754,7 +806,11 @@ def ask():
     data = request.json
     user_principal = data.get('user_principal') or ""
     agent_id = data.get('agent_id')  # Agent identity (e.g., swarm_agent_001)
-    realm_principal = data.get('realm_principal') or ""
+    # User-scoped assistant (#233): the assistant is owned by the user; the realm
+    # is OPTIONAL context. `context_realm` is the canonical field; `realm_principal`
+    # is accepted as a back-compat alias. When empty → general (cross-realm) mode:
+    # realm status / codex / proposal enrichment and realm tools are skipped.
+    realm_principal = data.get('context_realm') or data.get('realm_principal') or ""
     question = data.get('question')
     persona_name = data.get('persona')  # Optional persona name
     agent_name = data.get('agent_name')  # Optional agent display name
@@ -1409,22 +1465,31 @@ Format your response as exactly 3 questions, one per line, with no numbering or 
 
 @app.route('/api/conversations', methods=['GET'])
 def list_conversations():
-    """List a user's chat threads within a realm (for the conversation switcher)."""
+    """List a user's chat threads (for the conversation switcher).
+
+    User-scoped (#233): by default returns ALL of the user's threads across every
+    realm + general mode (one global inbox). Pass `context_realm` (or legacy
+    `realm_principal`) to scope to a single realm. Pass `scope=realm` together with
+    a realm id to force realm-only; otherwise the realm arg is treated as a filter
+    only when explicitly provided.
+    """
     update_activity()
     user_principal = request.args.get('user_principal', '')
-    realm_principal = request.args.get('realm_principal', '')
+    # Optional realm filter. Absent → global user inbox.
+    context_realm = request.args.get('context_realm', '') or request.args.get('realm_principal', '')
 
     if not user_principal:
         return jsonify({"success": True, "conversations": []})
 
     try:
-        sessions = db_client.list_chat_sessions(user_principal, realm_principal)
+        sessions = db_client.list_chat_sessions(user_principal, context_realm or None)
         conversations = []
         for s in sessions:
             conversations.append({
                 "conversation_id": s.get('conversation_id'),
                 "title": s.get('title') or 'New conversation',
                 "persona": s.get('persona_name'),
+                "context_realm": s.get('context_realm') or s.get('realm_principal') or None,
                 "message_count": s.get('message_count', 0),
                 "created_at": str(s.get('created_at')) if s.get('created_at') else None,
                 "updated_at": str(s.get('updated_at')) if s.get('updated_at') else None,
@@ -1441,7 +1506,8 @@ def create_conversation():
     update_activity()
     data = request.json or {}
     user_principal = data.get('user_principal') or ""
-    realm_principal = data.get('realm_principal') or ""
+    # `context_realm` is the canonical field; `realm_principal` is a legacy alias.
+    context_realm = data.get('context_realm') or data.get('realm_principal') or ""
     persona_name = data.get('persona') or DEFAULT_PERSONA
     title = data.get('title')
 
@@ -1450,7 +1516,10 @@ def create_conversation():
 
     try:
         conversation_id = str(uuid.uuid4())
-        db_client.create_chat_session(conversation_id, user_principal, realm_principal, persona_name, title)
+        db_client.create_chat_session(
+            conversation_id, user_principal, context_realm, persona_name, title,
+            context_realm=context_realm or None,
+        )
         return jsonify({
             "success": True,
             "conversation_id": conversation_id,
@@ -1542,6 +1611,65 @@ def health():
         "inactivity_timeout_seconds": INACTIVITY_TIMEOUT_SECONDS,
         "seconds_since_last_activity": int(time.time() - last_activity_time) if INACTIVITY_TIMEOUT_SECONDS > 0 else None
     })
+
+# =============================================================================
+# MCP pairing tokens (self-service) — let a user connect their own Claude
+# (or any MCP client) to the Geister MCP server, scoped to their principal.
+# Follows the app's existing "trust the II-authenticated frontend's principal"
+# model; tokens are stored hashed and carry a 'read'/'full' scope.
+# =============================================================================
+
+@app.route('/api/mcp/tokens', methods=['POST'])
+def mint_mcp_token():
+    """Mint a personal MCP pairing token. Returns the plaintext token once."""
+    update_activity()
+    data = request.json or {}
+    user_principal = (data.get('user_principal') or "").strip()
+    if not user_principal:
+        return jsonify({"error": "user_principal is required"}), 400
+    scope = data.get('scope', 'read')
+    if scope not in ('read', 'full'):
+        return jsonify({"error": "scope must be 'read' or 'full'"}), 400
+    label = data.get('label', '')
+    ttl_days = data.get('ttl_days')
+    try:
+        import mcp_tokens
+        row = mcp_tokens.mint_token(user_principal, label=label, scope=scope, ttl_days=ttl_days)
+        return jsonify({"success": True, "token": row.pop("token"), "metadata": row}), 201
+    except Exception as e:
+        log(f"Error minting MCP token: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/mcp/tokens', methods=['GET'])
+def list_mcp_tokens():
+    """List a user's MCP pairing tokens (metadata only, never the secret)."""
+    user_principal = (request.args.get('user_principal') or "").strip()
+    if not user_principal:
+        return jsonify({"error": "user_principal is required"}), 400
+    try:
+        import mcp_tokens
+        return jsonify({"success": True, "tokens": mcp_tokens.list_tokens(user_principal)})
+    except Exception as e:
+        log(f"Error listing MCP tokens: {traceback.format_exc()}")
+        return jsonify({"error": str(e), "tokens": []}), 500
+
+
+@app.route('/api/mcp/tokens/<int:token_id>', methods=['DELETE'])
+def revoke_mcp_token(token_id):
+    """Revoke one of the user's MCP pairing tokens."""
+    update_activity()
+    data = request.json or {}
+    user_principal = (data.get('user_principal') or request.args.get('user_principal') or "").strip()
+    if not user_principal:
+        return jsonify({"error": "user_principal is required"}), 400
+    try:
+        import mcp_tokens
+        return jsonify({"success": True, "revoked": mcp_tokens.revoke_token(user_principal, token_id)})
+    except Exception as e:
+        log(f"Error revoking MCP token: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/agents', methods=['GET'])
 def list_agents():

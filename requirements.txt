@@ -7,3 +7,7 @@ runpod
 realms-gos>=0.2.5
 typer>=0.9.0
 rich>=13.0.0
+# MCP server (geister-mcp): exposes realm tools to external clients (e.g. Claude)
+mcp>=1.26.0
+uvicorn>=0.30.0
+starlette>=0.48.0

@@ -15,11 +15,25 @@ CREATE TABLE IF NOT EXISTS conversations (
 -- Add conversation_id to existing deployments (no-op if already present)
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS conversation_id TEXT;
 
+-- User-scoped assistant (issue #233): the assistant is owned by the USER, and the
+-- realm is optional CONTEXT (general mode when absent). `context_realm` supersedes
+-- `realm_principal` as the meaningful field; `realm_principal` is kept for
+-- backward-compat and is allowed to be empty for context-free (general) chats.
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS context_realm TEXT;
+-- Backfill existing rows: their realm IS their context.
+UPDATE conversations SET context_realm = realm_principal
+    WHERE context_realm IS NULL AND realm_principal IS NOT NULL AND realm_principal <> '';
+-- Relax the legacy NOT NULL so general-mode (no realm) rows can be stored.
+ALTER TABLE conversations ALTER COLUMN realm_principal DROP NOT NULL;
+
 -- Indexes for better query performance
 CREATE INDEX IF NOT EXISTS idx_conversations_persona_name ON conversations(persona_name);
 CREATE INDEX IF NOT EXISTS idx_conversations_user_realm_persona ON conversations(user_principal, realm_principal, persona_name);
 CREATE INDEX IF NOT EXISTS idx_conversations_user_agent ON conversations(user_principal, agent_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_conversation_id ON conversations(conversation_id);
+-- User-scoped listing/aggregation (realm-independent).
+CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_principal, created_at);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_context ON conversations(user_principal, context_realm);
 
 GRANT ALL PRIVILEGES ON TABLE conversations TO geister_user;
 GRANT USAGE, SELECT ON SEQUENCE conversations_id_seq TO geister_user;
@@ -28,14 +42,24 @@ GRANT USAGE, SELECT ON SEQUENCE conversations_id_seq TO geister_user;
 CREATE TABLE IF NOT EXISTS chat_sessions (
     conversation_id TEXT PRIMARY KEY,     -- UUID shared with conversations.conversation_id
     user_principal TEXT NOT NULL,
-    realm_principal TEXT NOT NULL,
+    realm_principal TEXT,                 -- Legacy; nullable for general-mode threads (#233)
+    context_realm TEXT,                   -- Optional realm CONTEXT; NULL = general mode
     persona_name TEXT DEFAULT 'ashoka',
     title TEXT,                           -- Human-readable thread title (auto from first question)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- User-scoped assistant migration (#233): realm becomes optional context.
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS context_realm TEXT;
+UPDATE chat_sessions SET context_realm = realm_principal
+    WHERE context_realm IS NULL AND realm_principal IS NOT NULL AND realm_principal <> '';
+ALTER TABLE chat_sessions ALTER COLUMN realm_principal DROP NOT NULL;
+
+-- Primary listing is BY USER (realm-independent); realm is an optional filter.
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_principal, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_realm ON chat_sessions(user_principal, realm_principal, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_context ON chat_sessions(user_principal, context_realm, updated_at DESC);
 
 GRANT ALL PRIVILEGES ON TABLE chat_sessions TO geister_user;
 

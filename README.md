@@ -61,6 +61,19 @@ sudo ./vm/setup.sh dev      # installs PostgreSQL, venv, dfx
 cd /srv/geister && git pull && docker compose -f vm/docker-compose.yml up -d --build
 ```
 
+## MCP Server (connect your own Claude)
+
+Geister exposes its realm tools over the Model Context Protocol so a user can
+drive them from their **own Claude** (or any MCP client), scoped to their IC
+principal via a personal pairing token.
+
+```bash
+./vm/mcp.sh start            # run the MCP server (Streamable HTTP :5001)
+curl https://geister-mcp.realmsgos.dev/healthz
+```
+
+See [docs/MCP_SERVER.md](docs/MCP_SERVER.md) for tokens, scopes, and Claude setup.
+
 ## Installation
 
 ```bash

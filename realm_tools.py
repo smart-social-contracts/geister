@@ -22,10 +22,34 @@ from urllib.parse import unquote
 # =============================================================================
 
 def _get_env() -> dict:
-    """Get environment with DFX warnings suppressed."""
+    """Environment for every `realms`/`dfx` subprocess.
+
+    Uses the repo-standard dfx environment (see realms `AGENTS.md` and every
+    deploy/test/publish script): `TERM=xterm` + `DFX_WARNING`.
+
+    `TERM` must be a real terminfo entry — `dumb` or an unset TERM makes
+    dfx 0.30.x panic at startup (`Failed to set stderr output color.:
+    ColorOutOfRange`) the moment it formats a colored error to stderr, which
+    aborts every mutating/erroring dfx path (create canister, deploy, failed
+    calls). `xterm` gives dfx a sane terminfo entry. The `realms` CLI
+    (rich/typer) will then emit ANSI codes, so parsers must run output through
+    `_strip_ansi()`.
+    """
     env = os.environ.copy()
+    env.setdefault('TERM', 'xterm')
+    if env.get('TERM', '').lower() in ('', 'dumb'):
+        env['TERM'] = 'xterm'
     env['DFX_WARNING'] = '-mainnet_plaintext_identity'
     return env
+
+
+# Matches ANSI SGR/color escape sequences (e.g. "\x1b[1m", "\x1b[0m").
+_ANSI_ESCAPE_RE = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences so regex parsers see clean CLI output."""
+    return _ANSI_ESCAPE_RE.sub('', text)
 
 
 def _run_dfx_call(
@@ -282,7 +306,7 @@ def list_realms(network: str = "staging", realm_folder: str = ".") -> str:
             env=_get_env()
         )
         
-        output = result.stdout + result.stderr
+        output = _strip_ansi(result.stdout + result.stderr)
         
         # Parse the Candid output to extract realm info
         realms = []
@@ -589,12 +613,20 @@ def realm_status(
         total_votes = sum(
             sum(p.get("votes", {}).values()) for p in props if isinstance(p, dict)
         )
-        vote_summary = {p["id"]: p.get("votes", {}) for p in props if isinstance(p, dict) and p.get("id")}
-        # Inject into status
+        proposals_with_votes = sum(
+            1 for p in props
+            if isinstance(p, dict) and sum(p.get("votes", {}).values()) > 0
+        )
+        # Inject compact vote aggregates into status. We deliberately do NOT
+        # embed a per-proposal vote map: for busy realms that breakdown is
+        # thousands of entries and dominates the payload (100KB+, which then
+        # overwhelms MCP clients). Callers who need per-proposal tallies should
+        # use get_proposals, which returns them.
         inner = status_data.get("data", {}).get("status", status_data) if isinstance(status_data, dict) else status_data
         if isinstance(inner, dict):
             inner["total_votes_cast"] = total_votes
-            inner["votes_by_proposal"] = vote_summary
+            inner["proposals_count"] = len(props)
+            inner["proposals_with_votes"] = proposals_with_votes
         return json.dumps(status_data)
     except Exception:
         return status_raw
