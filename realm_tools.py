@@ -1281,6 +1281,253 @@ def get_vault_status(network: str = "staging", realm_folder: str = ".", realm_pr
 
 
 # =============================================================================
+# Litigation Tools (justice_litigation extension)   — geister issue #20
+# =============================================================================
+
+def _make_litigation_content_payload(title: str, description: str) -> str:
+    """Produce a test-mode litigation content ciphertext blob.
+
+    In production, IBE vetkeys encrypt this for (submitter, Justice dept) only.
+    For E2E testing we wrap plaintext in the expected ``enc:v=test:`` envelope so
+    the extension can store and return it without a key-management round-trip.
+    """
+    import base64
+    payload = json.dumps({"title": title, "description": description})
+    return "enc:v=test:" + base64.b64encode(payload.encode()).decode()
+
+
+def sue_user(
+    defendant_principal: str,
+    realm_principal: str = "",
+    identity: str = "",
+    network: str = "staging",
+    realm_folder: str = ".",
+    defendant_quarter_id: str = "",
+) -> str:
+    """File a litigation case against another member (cross-quarter supported).
+
+    Returns JSON with ``data.id`` (case_id) on success.
+    Pass ``defendant_quarter_id`` for cross-quarter suits (the canister ID of the
+    defendant's home quarter backend).
+    """
+    args: Dict[str, Any] = {
+        "defendant_kind": "user",
+        "defendant_principal": defendant_principal,
+    }
+    if defendant_quarter_id:
+        args["defendant_quarter_id"] = defendant_quarter_id
+    return _run_extension_call(
+        "justice_litigation", "create_litigation", args,
+        network=network, realm_folder=realm_folder,
+        identity=identity, realm_principal=realm_principal,
+    )
+
+
+def sue_department(
+    defendant_department: str,
+    realm_principal: str = "",
+    identity: str = "",
+    network: str = "staging",
+    realm_folder: str = ".",
+    defendant_quarter_id: str = "",
+) -> str:
+    """File a litigation case against a realm department.
+
+    ``defendant_department`` is the department name (e.g. ``"Treasury"``).
+    """
+    args: Dict[str, Any] = {
+        "defendant_kind": "department",
+        "defendant_department": defendant_department,
+    }
+    if defendant_quarter_id:
+        args["defendant_quarter_id"] = defendant_quarter_id
+    return _run_extension_call(
+        "justice_litigation", "create_litigation", args,
+        network=network, realm_folder=realm_folder,
+        identity=identity, realm_principal=realm_principal,
+    )
+
+
+def set_litigation_content(
+    case_id: str,
+    title: str,
+    description: str,
+    realm_principal: str = "",
+    identity: str = "",
+    network: str = "staging",
+    realm_folder: str = ".",
+) -> str:
+    """Attach (encrypted) content to a litigation case.
+
+    For E2E testing the payload is a ``enc:v=test:`` envelope containing the
+    title/description as base64 JSON; production builds use IBE encryption.
+    """
+    ciphertext = _make_litigation_content_payload(title, description)
+    return _run_extension_call(
+        "justice_litigation", "set_litigation_content",
+        {"id": case_id, "ciphertext": ciphertext},
+        network=network, realm_folder=realm_folder,
+        identity=identity, realm_principal=realm_principal,
+    )
+
+
+def assign_judge(
+    case_id: str,
+    judge_principal: str,
+    realm_principal: str = "",
+    identity: str = "",
+    network: str = "staging",
+    realm_folder: str = ".",
+) -> str:
+    """Assign a judge to an open litigation case (admin/justice-dept action)."""
+    return _run_extension_call(
+        "justice_litigation", "assign_judge",
+        {"case_id": case_id, "judge_principal": judge_principal},
+        network=network, realm_folder=realm_folder,
+        identity=identity, realm_principal=realm_principal,
+    )
+
+
+def issue_verdict(
+    case_id: str,
+    decision: str,
+    penalties: Optional[list] = None,
+    reasoning: str = "",
+    realm_principal: str = "",
+    identity: str = "",
+    network: str = "staging",
+    realm_folder: str = ".",
+) -> str:
+    """Issue a verdict on a case (judge action).
+
+    ``decision``: ``"guilty"`` | ``"not_guilty"`` | ``"settled"``
+    ``penalties``: list of penalty dicts with keys ``type``, ``amount``,
+    ``currency`` (default ``"AGO"``), ``description``, ``target_user_id``.
+    """
+    args: Dict[str, Any] = {"case_id": case_id, "decision": decision}
+    if reasoning:
+        args["reasoning"] = reasoning
+    if penalties:
+        args["penalties"] = penalties
+    return _run_extension_call(
+        "justice_litigation", "issue_verdict", args,
+        network=network, realm_folder=realm_folder,
+        identity=identity, realm_principal=realm_principal,
+    )
+
+
+def execute_penalty(
+    penalty_id: str,
+    realm_principal: str = "",
+    identity: str = "",
+    network: str = "staging",
+    realm_folder: str = ".",
+) -> str:
+    """Execute a penalty after verdict (admin/justice action)."""
+    return _run_extension_call(
+        "justice_litigation", "execute_penalty",
+        {"penalty_id": penalty_id},
+        network=network, realm_folder=realm_folder,
+        identity=identity, realm_principal=realm_principal,
+    )
+
+
+def file_appeal(
+    case_id: str,
+    grounds: str,
+    realm_principal: str = "",
+    identity: str = "",
+    network: str = "staging",
+    realm_folder: str = ".",
+) -> str:
+    """File an appeal against the most recent verdict on a case."""
+    return _run_extension_call(
+        "justice_litigation", "file_appeal",
+        {"case_id": case_id, "grounds": grounds},
+        network=network, realm_folder=realm_folder,
+        identity=identity, realm_principal=realm_principal,
+    )
+
+
+def decide_appeal(
+    appeal_id: str,
+    decision: str,
+    reasoning: str = "",
+    realm_principal: str = "",
+    identity: str = "",
+    network: str = "staging",
+    realm_folder: str = ".",
+) -> str:
+    """Decide an appeal (appellate judge action).
+
+    ``decision``: ``"upheld"`` | ``"reversed"`` | ``"modified"`` | ``"remanded"``
+    """
+    args: Dict[str, Any] = {"appeal_id": appeal_id, "decision": decision}
+    if reasoning:
+        args["reasoning"] = reasoning
+    return _run_extension_call(
+        "justice_litigation", "decide_appeal", args,
+        network=network, realm_folder=realm_folder,
+        identity=identity, realm_principal=realm_principal,
+    )
+
+
+def get_cases(
+    court_id: str = "",
+    status: str = "",
+    realm_principal: str = "",
+    network: str = "staging",
+    realm_folder: str = ".",
+    identity: str = "",
+) -> str:
+    """List litigation cases, optionally filtered by court or status."""
+    args: Dict[str, Any] = {}
+    if court_id:
+        args["court_id"] = court_id
+    if status:
+        args["status"] = status
+    return _run_extension_call(
+        "justice_litigation", "get_cases", args,
+        network=network, realm_folder=realm_folder,
+        identity=identity, realm_principal=realm_principal,
+    )
+
+
+def get_case(
+    case_id: str,
+    realm_principal: str = "",
+    network: str = "staging",
+    realm_folder: str = ".",
+    identity: str = "",
+) -> str:
+    """Get full details of a single litigation case by ID."""
+    return _run_extension_call(
+        "justice_litigation", "get_case",
+        {"case_id": case_id},
+        network=network, realm_folder=realm_folder,
+        identity=identity, realm_principal=realm_principal,
+    )
+
+
+def get_litigations(
+    user_id: str = "",
+    realm_principal: str = "",
+    network: str = "staging",
+    realm_folder: str = ".",
+    identity: str = "",
+) -> str:
+    """List litigation requests (privacy-aware; shows only cases visible to caller)."""
+    args: Dict[str, Any] = {}
+    if user_id:
+        args["user_id"] = user_id
+    return _run_extension_call(
+        "justice_litigation", "get_litigations", args,
+        network=network, realm_folder=realm_folder,
+        identity=identity, realm_principal=realm_principal,
+    )
+
+
+# =============================================================================
 # ICW Token Tools (Internet Computer Wallet)
 # =============================================================================
 
@@ -1775,6 +2022,173 @@ REALM_TOOLS = [
             "parameters": {"type": "object", "properties": {}, "required": []}
         }
     },
+    # Litigation Tools — justice_litigation extension
+    {
+        "type": "function",
+        "function": {
+            "name": "sue_user",
+            "description": "File a litigation case against another realm member. Returns the case_id on success.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "defendant_principal": {"type": "string", "description": "Principal ID of the member to sue"},
+                    "defendant_quarter_id": {"type": "string", "description": "Canister ID of the defendant's home quarter (leave empty for same-quarter suits)"},
+                },
+                "required": ["defendant_principal"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "sue_department",
+            "description": "File a litigation case against a realm department (e.g. 'Treasury', 'Justice').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "defendant_department": {"type": "string", "description": "Department name to sue"},
+                    "defendant_quarter_id": {"type": "string", "description": "Canister ID of the quarter where the department lives (leave empty for same-quarter)"},
+                },
+                "required": ["defendant_department"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_litigation_content",
+            "description": "Attach title and description to a litigation case (encrypted in production, test-envelope in E2E mode).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "case_id": {"type": "string", "description": "ID of the case"},
+                    "title": {"type": "string", "description": "Case title"},
+                    "description": {"type": "string", "description": "Full description of the grievance"},
+                },
+                "required": ["case_id", "title", "description"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "assign_judge",
+            "description": "Assign a judge to a pending case (admin or Justice dept action).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "case_id": {"type": "string", "description": "ID of the case"},
+                    "judge_principal": {"type": "string", "description": "Principal ID of the judge"},
+                },
+                "required": ["case_id", "judge_principal"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "issue_verdict",
+            "description": "Issue a verdict on a case (judge action). decision must be 'guilty', 'not_guilty', or 'settled'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "case_id": {"type": "string", "description": "ID of the case"},
+                    "decision": {"type": "string", "enum": ["guilty", "not_guilty", "settled"], "description": "Verdict decision"},
+                    "reasoning": {"type": "string", "description": "Optional reasoning for the verdict"},
+                    "penalties": {"type": "array", "description": "Optional list of penalty dicts (type, amount, currency, description, target_user_id)"},
+                },
+                "required": ["case_id", "decision"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_penalty",
+            "description": "Execute a penalty after a verdict has been issued (admin/Justice action).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "penalty_id": {"type": "string", "description": "ID of the penalty to execute"},
+                },
+                "required": ["penalty_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "file_appeal",
+            "description": "File an appeal against the most recent verdict on a case.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "case_id": {"type": "string", "description": "ID of the case to appeal"},
+                    "grounds": {"type": "string", "description": "Grounds for the appeal"},
+                },
+                "required": ["case_id", "grounds"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "decide_appeal",
+            "description": "Decide an appeal (appellate judge action). decision: 'upheld', 'reversed', 'modified', 'remanded'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "appeal_id": {"type": "string", "description": "ID of the appeal"},
+                    "decision": {"type": "string", "enum": ["upheld", "reversed", "modified", "remanded"], "description": "Appeal decision"},
+                    "reasoning": {"type": "string", "description": "Optional reasoning"},
+                },
+                "required": ["appeal_id", "decision"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_cases",
+            "description": "List litigation cases in the realm, optionally filtered by court or status.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "court_id": {"type": "string", "description": "Filter by court ID (optional)"},
+                    "status": {"type": "string", "description": "Filter by case status (optional)"},
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_case",
+            "description": "Get full details of a single litigation case by ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "case_id": {"type": "string", "description": "ID of the case"},
+                },
+                "required": ["case_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_litigations",
+            "description": "List your litigation requests (privacy-aware — only cases you can see).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string", "description": "Filter by user ID (optional)"},
+                },
+                "required": []
+            }
+        }
+    },
     # ICW Token Tools
     {
         "type": "function",
@@ -1918,6 +2332,18 @@ TOOL_FUNCTIONS = {
     "get_balance": get_balance,
     "get_transactions": get_transactions,
     "get_vault_status": get_vault_status,
+    # Litigation
+    "sue_user": sue_user,
+    "sue_department": sue_department,
+    "set_litigation_content": set_litigation_content,
+    "assign_judge": assign_judge,
+    "issue_verdict": issue_verdict,
+    "execute_penalty": execute_penalty,
+    "file_appeal": file_appeal,
+    "decide_appeal": decide_appeal,
+    "get_cases": get_cases,
+    "get_case": get_case,
+    "get_litigations": get_litigations,
     # ICW Token Tools
     "icw_check_balance": icw_check_balance,
     "icw_transfer_tokens": icw_transfer_tokens,
