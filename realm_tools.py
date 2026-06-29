@@ -22,18 +22,20 @@ from urllib.parse import unquote
 # =============================================================================
 
 def _get_env() -> dict:
-    """Environment for every `realms`/`dfx` subprocess.
+    """Environment for dfx canister-call subprocesses.
 
-    Uses the repo-standard dfx environment (see realms `AGENTS.md` and every
-    deploy/test/publish script): `TERM=xterm` + `DFX_WARNING`.
+    NOTE — Phase 1 of the dfx → icp-cli migration (issue #17): identity
+    management has moved to icp-cli (see icp_identity.py).  Canister calls
+    still use dfx because `icp canister call --json` produces a different
+    output format (`{"response_bytes":…,"response_candid":"…"}`) that is
+    incompatible with the JSON parsers throughout realm_tools.py.  Phase 2
+    will replace _run_dfx_call with an icp-based equivalent and remove this
+    dfx dependency entirely.
 
-    `TERM` must be a real terminfo entry — `dumb` or an unset TERM makes
-    dfx 0.30.x panic at startup (`Failed to set stderr output color.:
-    ColorOutOfRange`) the moment it formats a colored error to stderr, which
-    aborts every mutating/erroring dfx path (create canister, deploy, failed
-    calls). `xterm` gives dfx a sane terminfo entry. The `realms` CLI
-    (rich/typer) will then emit ANSI codes, so parsers must run output through
-    `_strip_ansi()`.
+    `TERM=xterm` is required: dfx 0.30.x panics on `ColorOutOfRange` if TERM
+    is unset or `dumb`.  `DFX_WARNING` suppresses the mainnet plaintext-
+    identity warning noise.  The `realms` CLI emits ANSI codes, so callers
+    must run output through `_strip_ansi()`.
     """
     env = os.environ.copy()
     env.setdefault('TERM', 'xterm')
@@ -290,6 +292,55 @@ def _run_realms_cli(
 # Registry/Mundus Tools
 # =============================================================================
 
+def _parse_dfx_nat(value) -> int:
+    """Parse a Candid nat/nat64 from dfx JSON (often a string like '5_598')."""
+    if value is None:
+        return 0
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value).replace("_", ""))
+    except ValueError:
+        return 0
+
+
+def _fetch_live_realm_summary(
+    realm_id: str,
+    network: str = "staging",
+    realm_folder: str = ".",
+) -> dict:
+    """Live realm metrics from realm_backend.status().
+
+    The registry's RealmRecord.users_count is often stale (0). The registry
+    frontend enriches each card by calling status() on the realm canister; MCP
+    list_realms does the same so Claude sees the same numbers as the UI.
+    """
+    raw = _run_dfx_call(
+        canister="realm_backend",
+        method="status",
+        network=network,
+        realm_folder=realm_folder,
+        realm_principal=realm_id,
+        timeout=30,
+    )
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict) or data.get("error"):
+            return {}
+        status = data.get("data", {}).get("status", {})
+        if not isinstance(status, dict):
+            return {}
+        stage = status.get("realm_stage")
+        if isinstance(stage, list) and stage:
+            stage = stage[0]
+        return {
+            "users_count": _parse_dfx_nat(status.get("users_count")),
+            "realm_stage": stage or "",
+        }
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
 def list_realms(network: str = "staging", realm_folder: str = ".") -> str:
     """List all available realms in the mundus registry."""
     import re
@@ -335,6 +386,14 @@ def list_realms(network: str = "staging", realm_folder: str = ".") -> str:
                 realm['users_count'] = int(users_match.group(1))
             
             if realm.get('name'):
+                # Registry users_count is often 0; enrich from live status().
+                rid = realm.get('id')
+                if rid:
+                    live = _fetch_live_realm_summary(rid, network, realm_folder)
+                    if live.get("users_count") is not None:
+                        realm['users_count'] = live['users_count']
+                    if live.get("realm_stage"):
+                        realm['realm_stage'] = live['realm_stage']
                 realms.append(realm)
         
         if realms:

@@ -136,14 +136,21 @@ def get_api_url() -> str:
 
 
 def get_current_user_principal() -> str:
-    """Get the current user's dfx identity principal."""
+    """Get the current user's principal via icp-cli (dfx fallback)."""
     import subprocess
+    from icp_identity import icp_principal, icp_default
+    try:
+        current = icp_default()
+        if current:
+            p = icp_principal(current)
+            if p:
+                return p
+    except Exception:
+        pass
     try:
         result = subprocess.run(
             ["dfx", "identity", "get-principal"],
-            capture_output=True,
-            text=True,
-            timeout=10
+            capture_output=True, text=True, timeout=10
         )
         if result.returncode == 0:
             return result.stdout.strip()
@@ -292,18 +299,19 @@ def agent_rm(
             console.print(f"[yellow]This will delete agent '{agent_id}'.[/yellow]")
             console.print("Run with --confirm to actually delete.")
             return
-        # Delete specific agent
+        # Delete specific agent from both icp and dfx stores
         import subprocess
+        from icp_identity import icp_delete
         try:
+            icp_delete(agent_id)
             result = subprocess.run(
                 ["dfx", "identity", "remove", agent_id],
-                capture_output=True,
-                text=True
+                capture_output=True, text=True
             )
             if result.returncode == 0:
                 console.print(f"[green]✅ Removed agent identity: {agent_id}[/green]")
             else:
-                console.print(f"[red]Failed to remove: {result.stderr}[/red]")
+                console.print(f"[red]Failed to remove from dfx: {result.stderr}[/red]")
         except Exception as e:
             console.print(f"[red]Error: {e}[/red]")
     else:

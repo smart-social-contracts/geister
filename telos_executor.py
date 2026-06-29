@@ -95,30 +95,35 @@ def wait_for_ollama(timeout: int = None) -> bool:
 
 
 def ensure_dfx_identity(identity_name: str) -> str:
-    """Create a dfx identity if it doesn't already exist. Returns the principal (or empty string on failure)."""
+    """Ensure an identity exists in both icp and dfx. Returns its principal (or '' on failure).
+
+    Check order: icp registry → dfx store (auto-sync to icp) → create with icp + mirror to dfx.
+    dfx is still needed while _run_dfx_call uses dfx --identity (Phase 1); Phase 2 removes dfx.
+    """
+    from icp_identity import icp_principal, icp_import_from_dfx, icp_create
     try:
-        result = subprocess.run(
+        # 1. Already in icp — fast path.
+        principal = icp_principal(identity_name)
+        if principal:
+            return principal
+
+        # 2. Exists in dfx but not icp — import into icp.
+        dfx_check = subprocess.run(
             ["dfx", "identity", "get-principal", "--identity", identity_name],
             capture_output=True, text=True, timeout=10
         )
-        if result.returncode == 0:
-            return result.stdout.strip()
-        # Identity doesn't exist — create it
-        log(f"  Creating dfx identity '{identity_name}'...")
-        create = subprocess.run(
-            ["dfx", "identity", "new", identity_name, "--storage-mode=plaintext"],
-            capture_output=True, text=True, timeout=10
-        )
-        if create.returncode == 0:
-            # Fetch the newly created principal
-            result2 = subprocess.run(
-                ["dfx", "identity", "get-principal", "--identity", identity_name],
-                capture_output=True, text=True, timeout=10
-            )
-            return result2.stdout.strip() if result2.returncode == 0 else ''
+        if dfx_check.returncode == 0:
+            icp_import_from_dfx(identity_name)
+            return dfx_check.stdout.strip()
+
+        # 3. Create fresh — icp_create() registers in icp and mirrors PEM to dfx.
+        log(f"  Creating identity '{identity_name}'...")
+        if icp_create(identity_name):
+            principal = icp_principal(identity_name)
+            return principal or ''
         return ''
     except Exception as e:
-        log(f"  Warning: could not ensure dfx identity '{identity_name}': {e}")
+        log(f"  Warning: could not ensure identity '{identity_name}': {e}")
         return ''
 
 

@@ -2,7 +2,9 @@
 """
 Agent Swarm - Run multiple citizen agents with unique identities.
 
-Uses dfx identity management to create unique principals for each agent.
+Uses icp-cli for identity management (Phase 1 migration from dfx).
+dfx is still used for canister calls via realm_tools._run_dfx_call (Phase 2).
+See GitHub issue #17 for the full migration plan.
 
 Usage:
     # Set Ollama host
@@ -35,6 +37,7 @@ from typing import List, Optional
 from citizen_agent import run_citizen_agent
 from persona_agent import run_persona_agent
 from citizen_personas import list_personas, get_persona
+from icp_identity import icp_principal, icp_import_from_dfx, icp_create, icp_delete, icp_default
 
 
 # =============================================================================
@@ -61,7 +64,13 @@ def get_agent_identity_name(index: int) -> str:
 
 
 def list_agent_identities() -> List[str]:
-    """List all existing agent identities."""
+    """List all existing agent identities.
+
+    Uses dfx as the authoritative source during the Phase 1 migration — dfx
+    sees all identities regardless of whether they have been imported into icp
+    yet.  Phase 2 will switch to `icp identity list --quiet` once all
+    identities are synced.
+    """
     try:
         result = subprocess.run(
             ["dfx", "identity", "list"],
@@ -79,58 +88,60 @@ def list_agent_identities() -> List[str]:
 
 
 def create_identity(name: str) -> bool:
-    """Create a new dfx identity."""
+    """Create a new identity using icp-cli, also registered in dfx.
+
+    icp_create() creates the key in icp's store and mirrors the PEM into
+    dfx's store so that _run_dfx_call (which still uses dfx --identity) keeps
+    working during the Phase 1 transition.
+    """
     try:
-        result = subprocess.run(
-            ["dfx", "identity", "new", name, "--storage-mode", "plaintext"],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        return result.returncode == 0
+        return icp_create(name)
     except Exception as e:
         log(f"Error creating identity {name}: {e}")
         return False
 
 
 def delete_identity(name: str) -> bool:
-    """Delete a dfx identity."""
+    """Delete an identity from both icp and dfx stores."""
     try:
-        result = subprocess.run(
+        icp_ok = icp_delete(name)
+        dfx = subprocess.run(
             ["dfx", "identity", "remove", name],
-            capture_output=True,
-            text=True,
-            timeout=30
+            capture_output=True, text=True, timeout=30
         )
-        return result.returncode == 0
+        return icp_ok and dfx.returncode == 0
     except Exception as e:
         log(f"Error deleting identity {name}: {e}")
         return False
 
 
 def use_identity(name: str) -> bool:
-    """Switch to a dfx identity."""
+    """Switch the current identity in both icp and dfx.
+
+    Both stores need to agree during Phase 1: icp for future icp commands,
+    dfx for the _run_dfx_call canister calls that are still dfx-based.
+    """
     try:
-        result = subprocess.run(
+        icp_default(name)
+        dfx = subprocess.run(
             ["dfx", "identity", "use", name],
-            capture_output=True,
-            text=True,
-            timeout=30
+            capture_output=True, text=True, timeout=30
         )
-        return result.returncode == 0
+        return dfx.returncode == 0
     except Exception as e:
         log(f"Error switching to identity {name}: {e}")
         return False
 
 
 def get_current_identity() -> str:
-    """Get the current dfx identity name."""
+    """Get the current identity name (icp default, dfx fallback)."""
+    name = icp_default()
+    if name:
+        return name
     try:
         result = subprocess.run(
             ["dfx", "identity", "whoami"],
-            capture_output=True,
-            text=True,
-            timeout=30
+            capture_output=True, text=True, timeout=30
         )
         return result.stdout.strip() if result.returncode == 0 else "unknown"
     except Exception:
@@ -138,13 +149,25 @@ def get_current_identity() -> str:
 
 
 def get_principal_for_identity(name: str) -> Optional[str]:
-    """Get the principal ID for an identity."""
+    """Get the principal for an identity.
+
+    Tries icp first (preferred); if the identity is not yet in icp's registry
+    it is imported from dfx automatically, then retried.  Falls back to dfx if
+    import fails.
+    """
+    principal = icp_principal(name)
+    if principal:
+        return principal
+    # Identity not in icp — try to import from dfx store
+    icp_import_from_dfx(name)
+    principal = icp_principal(name)
+    if principal:
+        return principal
+    # Last resort: dfx
     try:
         result = subprocess.run(
             ["dfx", "identity", "get-principal", "--identity", name],
-            capture_output=True,
-            text=True,
-            timeout=30
+            capture_output=True, text=True, timeout=30
         )
         return result.stdout.strip() if result.returncode == 0 else None
     except Exception:
