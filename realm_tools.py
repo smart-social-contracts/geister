@@ -22,27 +22,73 @@ from urllib.parse import unquote
 # =============================================================================
 
 def _get_env() -> dict:
-    """Environment for dfx canister-call subprocesses.
+    """Environment for subprocesses (realms CLI, etc.).
 
-    NOTE — Phase 1 of the dfx → icp-cli migration (issue #17): identity
-    management has moved to icp-cli (see icp_identity.py).  Canister calls
-    still use dfx because `icp canister call --json` produces a different
-    output format (`{"response_bytes":…,"response_candid":"…"}`) that is
-    incompatible with the JSON parsers throughout realm_tools.py.  Phase 2
-    will replace _run_dfx_call with an icp-based equivalent and remove this
-    dfx dependency entirely.
-
-    `TERM=xterm` is required: dfx 0.30.x panics on `ColorOutOfRange` if TERM
-    is unset or `dumb`.  `DFX_WARNING` suppresses the mainnet plaintext-
-    identity warning noise.  The `realms` CLI emits ANSI codes, so callers
-    must run output through `_strip_ansi()`.
+    NOTE — Phase 2 of the dfx→icp-cli migration (issue #18): canister calls
+    now use `icp canister call` (see _run_dfx_call / _run_icp_call below).
+    dfx is no longer invoked for canister calls; TERM/DFX_WARNING are kept for
+    the `realms` CLI which still emits ANSI codes.
     """
     env = os.environ.copy()
     env.setdefault('TERM', 'xterm')
     if env.get('TERM', '').lower() in ('', 'dumb'):
         env['TERM'] = 'xterm'
-    env['DFX_WARNING'] = '-mainnet_plaintext_identity'
     return env
+
+
+# Maps dfx network names → icp-cli network name / flag.
+# dfx "staging", "demo", "test" all point to https://icp0.io (same as IC mainnet);
+# icp's built-in "ic" network reaches the same endpoint.
+_ICP_NETWORK = {
+    "staging": "ic",
+    "ic":      "ic",
+    "demo":    "ic",
+    "test":    "ic",
+    "local":   "local",
+}
+
+
+import functools as _functools
+
+
+@_functools.lru_cache(maxsize=32)
+def _load_dfx_json(realm_folder: str) -> dict:
+    """Return the parsed dfx.json for *realm_folder* (cached)."""
+    path = os.path.join(realm_folder, "dfx.json")
+    try:
+        with open(path) as _f:
+            return json.load(_f)
+    except Exception:
+        return {}
+
+
+def _find_candid_file(canister: str, realm_folder: str) -> str:
+    """Return absolute path to *canister*'s .did file, or '' if not found."""
+    rel = _load_dfx_json(realm_folder).get("canisters", {}).get(canister, {}).get("candid", "")
+    if not rel or rel.startswith("http"):
+        return ""
+    path = os.path.join(realm_folder, rel)
+    return path if os.path.exists(path) else ""
+
+
+@_functools.lru_cache(maxsize=32)
+def _load_canister_ids(realm_folder: str) -> dict:
+    """Return the parsed canister_ids.json for *realm_folder* (cached)."""
+    path = os.path.join(realm_folder, "canister_ids.json")
+    try:
+        with open(path) as _f:
+            return json.load(_f)
+    except Exception:
+        return {}
+
+
+def _resolve_canister_principal(canister: str, network: str, realm_folder: str) -> str:
+    """Look up a canister's principal from canister_ids.json. Returns '' on miss."""
+    ids = _load_canister_ids(realm_folder)
+    icp_net = _ICP_NETWORK.get(network, "ic")
+    entry = ids.get(canister, {})
+    # Try exact network name first, then the mapped icp network name
+    return entry.get(network) or entry.get(icp_net) or ""
 
 
 # Matches ANSI SGR/color escape sequences (e.g. "\x1b[1m", "\x1b[0m").
@@ -65,34 +111,60 @@ def _run_dfx_call(
     identity: str = ""
 ) -> str:
     """
-    Run a dfx canister call with JSON output.
-    
+    Make a canister call and return a JSON string.
+
+    Phase 2 of the dfx→icp-cli migration (geister issue #18): this function now
+    uses `icp canister call --json` instead of `dfx canister call --output json`.
+    The Candid-text in `response_candid` is decoded by candid_text.parse() and
+    re-serialised to JSON, preserving the same shape as dfx's JSON output so all
+    downstream parsers in realm_tools.py continue to work unchanged.
+
+    A `.did` file is looked up from dfx.json in *realm_folder* and passed via
+    `--candid` so icp can decode responses with human-readable field names rather
+    than numeric hashes.
+
     Args:
-        canister: Canister name (e.g., "realm_backend") - used if realm_principal not provided
-        method: Method to call
-        args: Candid arguments string
-        network: Network to use
-        realm_folder: Working directory with dfx.json
-        timeout: Command timeout in seconds
-        realm_principal: Canister ID to use directly (overrides canister name)
-        identity: dfx identity to use for the call (uses current identity if not specified)
-    
+        canister: Canister name (e.g. "realm_backend") — used to find the .did
+                  file and as target when realm_principal is empty.
+        method: Method to call.
+        args: Candid text arguments string.
+        network: Network name ("staging", "ic", "local", …).
+        realm_folder: Directory containing dfx.json (for .did lookup).
+        timeout: Subprocess timeout in seconds.
+        realm_principal: Canister principal ID (takes priority over canister name).
+        identity: icp/dfx identity to use; empty → icp default.
+
     Returns:
-        JSON string result or error message
+        JSON string, or {"error": "…"} on failure.
     """
-    # Use realm_principal (canister ID) if provided, otherwise use canister name
-    target_canister = realm_principal if realm_principal else canister
-    
-    cmd = [
-        "dfx", "canister", "call", target_canister, method, args,
-        "--network", network,
-        "--output", "json"
-    ]
-    
-    # Use specific identity if provided
+    import candid_text as _ct
+    from icp_identity import icp_import_from_dfx
+
+    icp_net = _ICP_NETWORK.get(network, "ic")
+
+    # icp-cli cannot resolve canister names without a project manifest; always use
+    # a principal ID.  Prefer the explicitly supplied realm_principal, then look up
+    # from canister_ids.json, and fall back to the bare canister name as last resort.
+    target = (
+        realm_principal
+        or _resolve_canister_principal(canister, network, realm_folder)
+        or canister
+    )
+
+    cmd = ["icp", "canister", "call", target, method, args, "-n", icp_net, "--json"]
+
+    did_file = _find_candid_file(canister, realm_folder)
+    if did_file:
+        cmd.extend(["--candid", did_file])
+
     if identity:
+        # Ensure this identity is known to icp (it may have been created by dfx only).
+        try:
+            icp_import_from_dfx(identity)
+        except Exception:
+            pass
         cmd.extend(["--identity", identity])
-    
+
     try:
         result = subprocess.run(
             cmd,
@@ -100,10 +172,22 @@ def _run_dfx_call(
             text=True,
             timeout=timeout,
             cwd=realm_folder,
-            env=_get_env()
+            env=_get_env(),
         )
         if result.returncode == 0:
-            return result.stdout.strip() or "{}"
+            raw = result.stdout.strip()
+            if not raw:
+                return "{}"
+            try:
+                envelope = json.loads(raw)
+                candid_str = envelope.get("response_candid") or ""
+                if candid_str:
+                    parsed = _ct.parse(candid_str)
+                    return json.dumps(parsed) if parsed is not None else "{}"
+                # Unexpected envelope shape — return raw so callers can inspect
+                return raw
+            except (json.JSONDecodeError, Exception):
+                return json.dumps({"error": raw})
         else:
             return json.dumps({"error": result.stderr.strip()})
     except subprocess.TimeoutExpired:
