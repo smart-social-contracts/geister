@@ -100,6 +100,86 @@ def _strip_ansi(text: str) -> str:
     return _ANSI_ESCAPE_RE.sub('', text)
 
 
+def _has_hash_keys(obj: Any) -> bool:
+    """Return True if `obj` (recursively) contains any Candid numeric hash key (_NNNN)."""
+    if isinstance(obj, dict):
+        for k in obj:
+            if isinstance(k, str) and k.startswith("_") and k[1:].isdigit():
+                return True
+            if _has_hash_keys(obj[k]):
+                return True
+    elif isinstance(obj, list):
+        return any(_has_hash_keys(item) for item in obj)
+    return False
+
+
+@_functools.lru_cache(maxsize=64)
+def _fetch_live_candid(principal: str, icp_net: str, timeout: int) -> str:
+    """Fetch the live Candid interface from a canister and cache it in /tmp.
+
+    Returns the path to a temporary .did file, or '' on failure.
+    Caches the result so subsequent calls within the same process are free.
+    """
+    result = subprocess.run(
+        ["icp", "canister", "call", principal, "__get_candid_interface_tmp_hack",
+         "()", "-n", icp_net, "--query", "--json"],
+        capture_output=True, text=True, timeout=timeout,
+    )
+    if result.returncode != 0:
+        return ""
+    try:
+        import icp_candid as _ic
+        envelope = json.loads(result.stdout.strip())
+        candid_text_raw = envelope.get("response_candid", "")
+        did_content = _ic.parse(candid_text_raw)
+        if not isinstance(did_content, str) or "service" not in did_content:
+            return ""
+        import tempfile
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".did", prefix=f"live_{principal[:8]}_",
+            delete=False,
+        )
+        tmp.write(did_content)
+        tmp.close()
+        return tmp.name
+    except Exception:
+        return ""
+
+
+def _dfx_fallback(
+    canister: str,
+    method: str,
+    args: str = "()",
+    network: str = "staging",
+    realm_folder: str = ".",
+    timeout: int = 60,
+    realm_principal: str = "",
+    identity: str = "",
+) -> str:
+    """Fallback to dfx canister call --output json when icp fails."""
+    target = realm_principal or canister
+    cmd = [
+        "dfx", "canister", "call", target, method, args,
+        "--network", network, "--output", "json",
+    ]
+    if identity:
+        cmd.extend(["--identity", identity])
+    env = _get_env()
+    env.setdefault("DFX_WARNING", "-mainnet_plaintext_identity")
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout,
+            cwd=realm_folder, env=env,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip() or "{}"
+        return json.dumps({"error": result.stderr.strip()})
+    except subprocess.TimeoutExpired:
+        return json.dumps({"error": "Command timed out (dfx fallback)"})
+    except Exception as e:
+        return json.dumps({"error": f"dfx fallback failed: {e}"})
+
+
 def _run_dfx_call(
     canister: str,
     method: str,
@@ -137,7 +217,7 @@ def _run_dfx_call(
     Returns:
         JSON string, or {"error": "…"} on failure.
     """
-    import candid_text as _ct
+    import icp_candid as _ct
     from icp_identity import icp_import_from_dfx
 
     icp_net = _ICP_NETWORK.get(network, "ic")
@@ -183,13 +263,37 @@ def _run_dfx_call(
                 candid_str = envelope.get("response_candid") or ""
                 if candid_str:
                     parsed = _ct.parse(candid_str)
-                    return json.dumps(parsed) if parsed is not None else "{}"
+                    if parsed is not None:
+                        # If we got numeric hash keys (DID file missing/incomplete),
+                        # try fetching the live candid from the canister and retrying.
+                        if _has_hash_keys(parsed) and did_file:
+                            live_did = _fetch_live_candid(target, icp_net, timeout)
+                            if live_did:
+                                retry_cmd = cmd[:]
+                                # replace existing --candid arg or append
+                                try:
+                                    idx = retry_cmd.index("--candid")
+                                    retry_cmd[idx + 1] = live_did
+                                except ValueError:
+                                    retry_cmd.extend(["--candid", live_did])
+                                r2 = subprocess.run(
+                                    retry_cmd, capture_output=True, text=True,
+                                    timeout=timeout, cwd=realm_folder, env=_get_env(),
+                                )
+                                if r2.returncode == 0:
+                                    env2 = json.loads(r2.stdout.strip() or "{}")
+                                    p2 = _ct.parse(env2.get("response_candid") or "")
+                                    if p2 is not None and not _has_hash_keys(p2):
+                                        return json.dumps(p2)
+                        return json.dumps(parsed)
                 # Unexpected envelope shape — return raw so callers can inspect
                 return raw
             except (json.JSONDecodeError, Exception):
                 return json.dumps({"error": raw})
         else:
-            return json.dumps({"error": result.stderr.strip()})
+            # icp failed — fall back to dfx for this call
+            return _dfx_fallback(canister, method, args, network, realm_folder,
+                                 timeout, realm_principal, identity)
     except subprocess.TimeoutExpired:
         return json.dumps({"error": "Command timed out"})
     except Exception as e:
