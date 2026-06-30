@@ -839,6 +839,83 @@ def join_realm(profile: str = "member", preferred_quarter: str = "", invite_code
     )
 
 
+def grant_delegation(
+    grantor: str,
+    delegate: str,
+    scope: dict,
+    network: str = "staging",
+    realm_folder: str = ".",
+    realm_principal: str = "",
+    identity: str = "",
+    label: str = "",
+    expires_in_hours: int = 168,
+    requires_acceptance: bool = True,
+) -> str:
+    """Grant Power of Attorney: allow delegate to act on grantor's behalf within scope.
+
+    Caller must be grantor (use matching identity) or realm admin.
+    scope example: {"operations": ["proposal.vote", "proposal.create"]} or {"all": true}
+    """
+    payload = json.dumps({
+        "grantor": grantor,
+        "delegate": delegate,
+        "scope": scope,
+        "label": label,
+        "expires_in_hours": expires_in_hours,
+        "requires_acceptance": requires_acceptance,
+    })
+    escaped = payload.replace("\\", "\\\\").replace('"', '\\"')
+    return _run_dfx_call(
+        canister="realm_backend",
+        method="grant_delegation_json",
+        args=f'("{escaped}")',
+        network=network,
+        realm_folder=realm_folder,
+        realm_principal=realm_principal,
+        identity=identity,
+    )
+
+
+def list_delegations(
+    network: str = "staging",
+    realm_folder: str = ".",
+    realm_principal: str = "",
+    identity: str = "",
+) -> str:
+    """List delegations where the caller is grantor or delegate."""
+    return _run_dfx_call(
+        canister="realm_backend",
+        method="list_delegations_json",
+        args="()",
+        network=network,
+        realm_folder=realm_folder,
+        realm_principal=realm_principal,
+        identity=identity,
+        query=True,
+    )
+
+
+def accept_delegation(
+    delegation_id: str,
+    network: str = "staging",
+    realm_folder: str = ".",
+    realm_principal: str = "",
+    identity: str = "",
+) -> str:
+    """Accept a pending delegation (delegate only)."""
+    payload = json.dumps({"delegation_id": delegation_id})
+    escaped = payload.replace("\\", "\\\\").replace('"', '\\"')
+    return _run_dfx_call(
+        canister="realm_backend",
+        method="accept_delegation_json",
+        args=f'("{escaped}")',
+        network=network,
+        realm_folder=realm_folder,
+        realm_principal=realm_principal,
+        identity=identity,
+    )
+
+
 def set_profile_picture(profile_picture_url: str, network: str = "staging", realm_folder: str = ".", realm_principal: str = "", identity: str = "") -> str:
     """Set your profile picture in the realm."""
     return _run_dfx_call(
@@ -1818,6 +1895,55 @@ REALM_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "grant_delegation",
+            "description": "Grant Power of Attorney: authorize another principal to act on your behalf within a scoped set of operations (e.g. voting). The delegate accepts in the realm UI before acting.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "grantor": {
+                        "type": "string",
+                        "description": "Grantor principal (must match caller identity unless admin)"
+                    },
+                    "delegate": {
+                        "type": "string",
+                        "description": "Delegate principal who may act on behalf of grantor"
+                    },
+                    "scope": {
+                        "type": "object",
+                        "description": "e.g. {\"operations\": [\"proposal.vote\"]} or {\"all\": true}"
+                    },
+                    "label": {"type": "string", "description": "Human-readable label"},
+                    "expires_in_hours": {"type": "integer", "default": 168}
+                },
+                "required": ["grantor", "delegate", "scope"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "accept_delegation",
+            "description": "Accept a pending delegation granted to the caller.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "delegation_id": {"type": "string", "description": "Delegation id from grant or list_delegations"}
+                },
+                "required": ["delegation_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_delegations",
+            "description": "List delegations where the caller is grantor or delegate.",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "set_profile_picture",
             "description": "Set your profile picture in the realm. Provide a URL to an image.",
             "parameters": {
@@ -2368,6 +2494,9 @@ TOOL_FUNCTIONS = {
     "registry_deploy_status": registry_deploy_status,
     # Citizen
     "join_realm": join_realm,
+    "grant_delegation": grant_delegation,
+    "accept_delegation": accept_delegation,
+    "list_delegations": list_delegations,
     "set_profile_picture": set_profile_picture,
     "get_my_status": get_my_status,
     "get_my_principal": get_my_principal,
