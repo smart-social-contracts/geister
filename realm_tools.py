@@ -696,6 +696,22 @@ def registry_deploy_realm(
 ) -> str:
     """Deploy a new realm via the registry canister's request_deployment method."""
     try:
+        # Shared-infra canister ids per environment, mirrored from the registry
+        # frontend's src/lib/config.js. The installer stamps these into the new
+        # realm's /canister_ids.js (file_registry for asset pulls; ii_derivation_origin
+        # pins Internet Identity so one human → one principal across every realm
+        # frontend + the registry — see realms #233 / IDENTITY_AND_ASSISTANT.md).
+        # The canonical derivationOrigin is the registry frontend's own canister
+        # origin; it serves /.well-known/ii-alternative-origins listing each realm
+        # frontend so II accepts the pinned origin.
+        infra_by_network = {
+            "staging": {
+                "file_registry_canister_id": "iebdk-kqaaa-aaaau-agoxq-cai",
+                "marketplace_canister_id": "jji3o-uyaaa-aaaah-qreja-cai",
+                "ii_derivation_origin": "https://77243-aqaaa-aaaau-aggza-cai.icp0.io",
+            },
+        }
+        infra = infra_by_network.get(network, infra_by_network["staging"])
         manifest = {
             "name": realm_name,
             "network": network,
@@ -708,6 +724,8 @@ def registry_deploy_realm(
                 "token_name": realm_name,
                 "token_symbol": realm_name[:4].upper(),
             },
+            # Shared infra ids stamped into the realm's /canister_ids.js by the installer.
+            "infra": infra,
             # Casals on-chain provisioning — creates backend + frontend canisters
             # using Casals authorized WASM keys (bare family = resolves to latest).
             "casals": {
