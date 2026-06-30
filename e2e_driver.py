@@ -139,7 +139,8 @@ class E2EDriver:
             args["preferred_quarter"] = preferred_quarter
         r = self.execute(agent, "join_realm", args, realm_principal=realm_principal)
         # "already" in error text means already a member — treat as success
-        if not r["ok"] and r.get("error") and "already" in r["error"].lower():
+        err_str = str(r.get("error") or "").lower()
+        if not r["ok"] and err_str and "already" in err_str:
             r["ok"] = True
             r["note"] = "already_joined"
         return r
@@ -251,7 +252,7 @@ class E2EDriver:
         r_create = self.execute(agent, "sue_user", create_args, realm_principal=realm_principal)
         if not r_create["ok"]:
             return r_create
-        case_id = (r_create.get("parsed") or {}).get("data", {}).get("id", "")
+        case_id = _extract_case_id(r_create)
         if not case_id:
             return _error_result("create_litigation returned no case_id", r_create["raw"])
         r_content = self.execute(agent, "set_litigation_content", {
@@ -278,7 +279,7 @@ class E2EDriver:
         r_create = self.execute(agent, "sue_department", create_args, realm_principal=realm_principal)
         if not r_create["ok"]:
             return r_create
-        case_id = (r_create.get("parsed") or {}).get("data", {}).get("id", "")
+        case_id = _extract_case_id(r_create)
         if not case_id:
             return _error_result("create_litigation returned no case_id", r_create["raw"])
         r_content = self.execute(agent, "set_litigation_content", {
@@ -381,6 +382,30 @@ class E2EDriver:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _extract_case_id(result: "Result") -> str:
+    """Extract case_id/id from a nested extension_sync_call response.
+
+    The ExtensionCallResponse wrapper is: {"response": "<json>", "success": bool}.
+    The inner json may be: {"success": true, "data": {"id": "..."}} or {"data": {...}}.
+    """
+    parsed = result.get("parsed") or {}
+    # Try direct data.id first (clean path)
+    direct = parsed.get("data", {})
+    if isinstance(direct, dict) and direct.get("id"):
+        return str(direct["id"])
+    # Unwrap nested response string
+    inner_str = parsed.get("response", "")
+    if isinstance(inner_str, str) and inner_str:
+        try:
+            inner = json.loads(inner_str)
+            data = inner.get("data", {})
+            if isinstance(data, dict) and data.get("id"):
+                return str(data["id"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return ""
+
 
 def _wrap_result(raw: str) -> Result:
     """Parse a raw JSON string from realm_tools into a Result dict."""

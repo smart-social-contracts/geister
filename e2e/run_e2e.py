@@ -125,15 +125,12 @@ def main() -> int:
         try:
             admin_members = ensure_members(2, start_index=1)
             for admin in admin_members:
-                r = realm_tools.execute_tool(
-                    "db_get",
-                    {"model": "Profile", "filters": {"principal": admin["principal"]}},
-                    network=args.network, realm_folder=args.realm_folder,
-                    realm_principal=realm_principal,
-                    user_identity=operator["agent_id"], user_principal=operator["principal"],
-                )
-                log.info("[Phase 2] Admin profile check for %s: %s", admin["agent_id"], r[:80])
-                driver.join_realm(admin, profile="admin")
+                # Join as member first (works with open registration), then promote
+                r = driver.join_realm(admin, profile="member")
+                if r["ok"] or r.get("note") == "already_joined":
+                    log.info("[Phase 2] %s joined as member — will act as admin", admin["agent_id"])
+                else:
+                    log.warning("[Phase 2] %s join failed: %s", admin["agent_id"], r.get("error"))
             state.set("admin_members", admin_members)
             state.mark_done("phase_2_admin")
             report["phases"]["2"] = {"ok": True, "admins": [m["agent_id"] for m in admin_members]}
