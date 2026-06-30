@@ -188,7 +188,8 @@ def _run_dfx_call(
     realm_folder: str = ".",
     timeout: int = 60,
     realm_principal: str = "",
-    identity: str = ""
+    identity: str = "",
+    query: bool = False,
 ) -> str:
     """
     Make a canister call and return a JSON string.
@@ -232,6 +233,8 @@ def _run_dfx_call(
     )
 
     cmd = ["icp", "canister", "call", target, method, args, "-n", icp_net, "--json"]
+    if query:
+        cmd.append("--query")
 
     did_file = _find_candid_file(canister, realm_folder)
     if did_file:
@@ -619,46 +622,60 @@ def search_realm(query: str, network: str = "staging", realm_folder: str = ".") 
 
 
 def registry_get_credits(principal_id: str, network: str = "staging", realm_folder: str = ".",
-                        billing_url: str = "https://billing.realmsgos.dev") -> str:
-    """Get credit balance for a principal from the registry."""
+                        billing_url: str = "https://billing.realmsgos.dev",
+                        identity: str = "") -> str:
+    """Get credit balance for a principal from the registry canister directly."""
     try:
-        resp = requests.get(f"{billing_url}/credits/{principal_id}", timeout=30)
-        if resp.status_code == 200:
-            data = resp.json()
+        result = _run_dfx_call(
+            canister="realm_registry_backend",
+            method="get_credits",
+            args=f'( "{principal_id}" )',
+            network=network,
+            realm_folder=realm_folder,
+            identity=identity,
+        )
+        if isinstance(result, dict) and "Ok" in result:
+            rec = result["Ok"]
+            bal = rec.get("balance", rec.get("credits", 0))
             return json.dumps({
-                "balance": data.get("credits", data.get("balance", 0)),
-                "total_purchased": data.get("total_purchased", 0),
-                "total_spent": data.get("total_spent", 0),
+                "credits": bal,
+                "balance": bal,
+                "total_purchased": rec.get("total_purchased", 0),
+                "total_spent": rec.get("total_spent", 0),
             })
-        else:
-            return json.dumps({"error": f"HTTP {resp.status_code}: {resp.text[:200]}"})
+        return json.dumps({"credits": 0, "balance": 0, "raw": result})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
 
 def registry_redeem_voucher(
     principal_id: str,
-    code: str,
+    voucher_code: str = "",
+    code: str = "",
     billing_url: str = "https://billing.realmsgos.dev",
     network: str = "staging",
     realm_folder: str = ".",
+    identity: str = "",
 ) -> str:
-    """Redeem a voucher code to add credits to the agent's balance."""
+    """Redeem an invitation/voucher code via the registry canister."""
+    actual_code = voucher_code or code
+    if not actual_code:
+        return json.dumps({"error": "No voucher_code provided"})
     try:
-        resp = requests.post(
-            f"{billing_url}/voucher/redeem",
-            json={"principal_id": principal_id, "code": code},
-            timeout=30
+        result = _run_dfx_call(
+            canister="realm_registry_backend",
+            method="redeem_invitation_code",
+            args=f'( "{actual_code}" )',
+            network=network,
+            realm_folder=realm_folder,
+            identity=identity,
         )
-        if resp.status_code == 200:
-            data = resp.json()
-            return json.dumps({
-                "success": True,
-                "credits_added": data.get("credits_added", 0),
-                "message": f"Voucher {code} redeemed successfully"
-            })
-        else:
-            return json.dumps({"error": f"HTTP {resp.status_code}: {resp.text[:200]}"})
+        if isinstance(result, dict) and result.get("success") is not False:
+            return json.dumps({"success": True, "message": f"Code {actual_code} redeemed", "data": result})
+        if isinstance(result, dict) and "Ok" in result:
+            return json.dumps({"success": True, "message": f"Code {actual_code} redeemed", "data": result["Ok"]})
+        err = result.get("error") or result.get("Err") or str(result) if isinstance(result, dict) else str(result)
+        return json.dumps({"success": False, "error": str(err)})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -670,99 +687,119 @@ def registry_deploy_realm(
     logo_url: str = "",
     welcome_image_url: str = "",
     welcome_message: str = "",
+    codex: str = "Agora",
+    use_casals: bool = True,
     management_url: str = "https://management.realmsgos.dev",
     network: str = "staging",
     realm_folder: str = ".",
+    identity: str = "",
 ) -> str:
-    """Deploy a new realm via the management service. Returns a deployment_id for status polling."""
+    """Deploy a new realm via the registry canister's request_deployment method."""
     try:
-        realm_config = {
+        manifest = {
             "name": realm_name,
-            "manifestos": {"en": description or f"Realm created by agent: {realm_name}"},
-            "languages": ["en"],
-            "welcome_messages": {"en": welcome_message or f"Welcome to {realm_name}!"},
-            "token_enabled": True,
-            "token_name": realm_name,
-            "token_symbol": realm_name[:4].upper(),
-            "extensions": [],
-        }
-        if logo_url:
-            realm_config["logo_url"] = logo_url
-        if welcome_image_url:
-            realm_config["welcome_image_url"] = welcome_image_url
-        resp = requests.post(
-            f"{management_url}/api/deploy",
-            json={
-                "principal_id": principal_id,
-                "realm_config": realm_config,
+            "network": network,
+            "realm": {
+                "name": realm_name,
+                "manifestos": {"en": description or f"E2E test realm: {realm_name}"},
+                "languages": ["en"],
+                "welcome_messages": {"en": welcome_message or f"Welcome to {realm_name}!"},
+                "token_enabled": True,
+                "token_name": realm_name,
+                "token_symbol": realm_name[:4].upper(),
             },
-            timeout=120
+            # Casals on-chain provisioning — creates backend + frontend canisters
+            # using Casals authorized WASM keys (bare family = resolves to latest).
+            "casals": {
+                "backend_wasm_key": "realm-backend",
+                "frontend_wasm_key": "realm-assets",
+            },
+        }
+        if codex:
+            manifest["realm"]["codex"] = {"codex_id": codex}
+        # The canister expects a JSON string — use Candid text literal with escaped inner quotes
+        manifest_str = json.dumps(manifest)
+        # Escape for Candid text literal: backslash-escape double quotes
+        candid_arg = '( "' + manifest_str.replace('\\', '\\\\').replace('"', '\\"') + '" )'
+        result = _run_dfx_call(
+            canister="realm_registry_backend",
+            method="request_deployment",
+            args=candid_arg,
+            network=network,
+            realm_folder=realm_folder,
+            identity=identity,
+            timeout=300,  # Casals provisioning creates canisters + installs WASMs — allow 5 min
         )
-        if resp.status_code == 200:
-            data = resp.json()
-            api_success = data.get("success", True)
-            result = {
-                "success": api_success,
-                "deployment_id": data.get("deployment_id"),
-            }
-            if api_success:
-                result["message"] = "Deployment started. Use registry_deploy_status to poll for completion."
-            else:
-                result["error"] = data.get("error") or data.get("message") or "Deploy failed"
-                result["message"] = data.get("message", "Deploy request failed")
-            return json.dumps(result)
-        else:
-            return json.dumps({"error": f"HTTP {resp.status_code}: {resp.text[:200]}"})
+        # The canister returns text which icp_candid double-encodes: str→json→str→json→dict
+        for _ in range(2):
+            if isinstance(result, str):
+                try:
+                    result = json.loads(result)
+                except Exception:
+                    break
+        if isinstance(result, dict):
+            if result.get("error") and not result.get("success"):
+                return json.dumps({"error": result["error"]})
+            job_id = result.get("job_id") or result.get("deployment_id")
+            return json.dumps({
+                "success": True,
+                "job_id": job_id,
+                "status": result.get("status", "pending"),
+                "data": result,
+                "message": "Deployment queued. Poll registry_deploy_status for completion.",
+            })
+        return json.dumps({"error": f"Unexpected response: {result}"})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
 
 def registry_deploy_status(
-    deployment_id: str,
+    job_id: str,
+    deployment_id: str = "",
     management_url: str = "https://management.realmsgos.dev",
-    wait: bool = True,
+    wait: bool = False,
     network: str = "staging",
     realm_folder: str = ".",
+    identity: str = "",
 ) -> str:
-    """Check deployment status. With wait=True, polls until completed or failed (up to 15 min)."""
-    import time
-    max_wait = 900  # 15 minutes
-    poll_interval = 15
-    start_time = time.time()
-    
+    """Check deployment status via the installer canister."""
+    actual_id = job_id or deployment_id
     try:
-        while True:
-            resp = requests.get(
-                f"{management_url}/api/deploy/{deployment_id}",
-                timeout=30
-            )
-            if resp.status_code != 200:
-                return json.dumps({"error": f"HTTP {resp.status_code}: {resp.text[:200]}"})
-            
-            data = resp.json()
-            status = data.get("status", "unknown")
-        
-            result_data = {
-                "status": status,
-                "deployment_id": deployment_id,
-            }
-            if data.get("realm_url"):
-                result_data["realm_url"] = data["realm_url"]
-            if data.get("realm_id"):
-                result_data["realm_id"] = data["realm_id"]
-            if data.get("error"):
-                result_data["error"] = data["error"][:200]
-            
-            # If not waiting or deployment finished, return immediately
-            if not wait or status in ("completed", "failed"):
-                return json.dumps(result_data)
-            
-            # Check timeout
-            if time.time() - start_time > max_wait:
-                result_data["warning"] = "Polling timed out after 15 minutes"
-                return json.dumps(result_data)
-            
-            time.sleep(poll_interval)
+        result = _run_dfx_call(
+            canister="realm_installer",
+            method="get_deployment_job_status",
+            args=f'( "{actual_id}" )',
+            network=network,
+            realm_folder=realm_folder,
+            identity=identity,
+            query=True,
+        )
+        for _ in range(2):
+            if isinstance(result, str):
+                try:
+                    result = json.loads(result)
+                except Exception:
+                    break
+        if isinstance(result, dict) and "Ok" in result:
+            job = result["Ok"]
+        elif isinstance(result, dict):
+            job = result
+        else:
+            return json.dumps({"error": f"Unexpected response: {result}"})
+
+        status = job.get("status", "unknown")
+        backend_id = job.get("backend_canister_id", "")
+        frontend_id = job.get("frontend_canister_id", "")
+        error = job.get("error", "")
+
+        return json.dumps({
+            "status": status,
+            "job_id": actual_id,
+            "realm_principal": backend_id or None,
+            "frontend_canister_id": frontend_id or None,
+            "error": error or None,
+            "raw": job,
+        })
     except Exception as e:
         return json.dumps({"error": str(e)})
 
@@ -771,12 +808,12 @@ def registry_deploy_status(
 # Citizen Tools
 # =============================================================================
 
-def join_realm(profile: str = "member", network: str = "staging", realm_folder: str = ".", realm_principal: str = "", identity: str = "") -> str:
+def join_realm(profile: str = "member", preferred_quarter: str = "", invite_code: str = "", network: str = "staging", realm_folder: str = ".", realm_principal: str = "", identity: str = "") -> str:
     """Join a realm as a citizen with a specific profile."""
     return _run_dfx_call(
         canister="realm_backend",
         method="join_realm",
-        args=f'("{profile}")',
+        args=f'("{profile}", "{preferred_quarter}", "{invite_code}")',
         network=network,
         realm_folder=realm_folder,
         realm_principal=realm_principal,

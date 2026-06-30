@@ -389,6 +389,10 @@ def _wrap_result(raw: str) -> Result:
     except (json.JSONDecodeError, TypeError):
         parsed = None
 
+    # An error-only dict (no "success" key) from _run_dfx_call / dfx fallback
+    if isinstance(parsed, dict) and "error" in parsed and "success" not in parsed:
+        return {"ok": False, "raw": raw, "parsed": parsed, "error": parsed["error"]}
+
     if isinstance(parsed, dict) and "error" in parsed and not parsed.get("success", True):
         return {"ok": False, "raw": raw, "parsed": parsed, "error": parsed["error"]}
 
@@ -410,7 +414,7 @@ def _list_icp_identities() -> set[str]:
     return {line.strip() for line in stdout.splitlines() if line.strip()}
 
 
-def _ensure_members_impl(n: int, persona: str, start_index: int) -> List[Member]:
+def _ensure_members_impl(n: int, persona: str = "compliant", start_index: int = 1) -> List[Member]:
     members: List[Member] = []
     existing = _list_icp_identities()
     for i in range(start_index, start_index + n):
